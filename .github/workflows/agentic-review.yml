@@ -1,0 +1,270 @@
+# Copyright The Linux Foundation and each contributor to LFX.
+# SPDX-License-Identifier: MIT
+#
+# Production agentic review. Two parallel, least-privilege jobs run agents over
+# the PR diff and reach GitHub only through deterministic scripts:
+#   - pr-reviewer posts findings, reconciles prior threads, and sets the
+#     per-commit agentic-review/clean status.
+#   - escalation judge sets the sticky needs-human label.
+# Neither agent can approve or merge; only the separate gate workflow approves.
+# Untrusted PR text (title, body) is passed via env, never interpolated into a
+# run script, to avoid script injection.
+#
+# The model is reached through GitHub Copilot via the pi coding agent
+# (github-copilot/gpt-5.5). A deterministic mint step exchanges the durable
+# Copilot token (the only stored secret, non-expiring) for a short-lived session
+# token and writes pi's auth file; pi never performs the cold exchange itself.
+# pi prints its verdict JSON to stdout; deterministic scripts do everything that
+# touches GitHub. pi holds only the model credential, no GitHub write power.
+---
+name: Agentic Review
+
+"on":
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: agentic-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  REPO: ${{ github.repository }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  BASE_REF: ${{ github.base_ref }}
+  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  PR_TITLE: ${{ github.event.pull_request.title }}
+  PR_BODY: ${{ github.event.pull_request.body }}
+  # The durable GitHub Copilot OAuth token (non-expiring). Only secret needed.
+  COPILOT_DURABLE_TOKEN: ${{ secrets.COPILOT_DURABLE_TOKEN }}
+  PI_VERSION: "0.79.10"
+  PI_MODEL: github-copilot/gpt-5.5
+  PI_THINKING: xhigh
+  # Title shown on the review summary comment. Per repo.
+  REVIEW_TITLE: Newsletter PR Reviewer
+
+jobs:
+  pr-reviewer:
+    name: pr-reviewer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Check model credential
+        id: key
+        run: |
+          if [ -z "$COPILOT_DURABLE_TOKEN" ]; then
+            echo "COPILOT_DURABLE_TOKEN is not configured; agentic review skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install central LFX skills (best effort)
+        if: steps.key.outputs.present == 'true'
+        continue-on-error: true
+        run: |
+          git clone --depth=1 https://github.com/linuxfoundation/lfx-skills "$RUNNER_TEMP/lfx-skills"
+          "$RUNNER_TEMP/lfx-skills/install.sh"
+
+      # Review against the merge-base (the state of the base when the PR
+      # branched), not the current base tip, so changes made on the base since
+      # then do not pollute the diff.
+      - name: Compute merge base
+        id: mb
+        if: steps.key.outputs.present == 'true'
+        run: |
+          if ! git fetch --no-tags origin "$BASE_REF"; then
+            echo "::warning::could not fetch base ref $BASE_REF; falling back to base.sha"
+          fi
+          MB="$(git merge-base FETCH_HEAD "$HEAD_SHA" 2>/dev/null || true)"
+          if [ -z "$MB" ]; then
+            echo "::warning::merge-base via base ref failed; using base.sha"
+            MB="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
+          fi
+          echo "merge_base=$MB" >> "$GITHUB_OUTPUT"
+
+      # Fetch the pr-reviewer's prior threads and summary BEFORE the agent runs,
+      # so the brief can ask it to reconcile them and post-comments can execute
+      # its verdicts. Read-only; fails closed on a fetch error.
+      - name: Fetch prior review state
+        if: steps.key.outputs.present == 'true'
+        env:
+          STATE_FILE: ${{ runner.temp }}/state.json
+        run: ./.github/scripts/agentic/fetch-state.sh
+
+      - name: Render brief
+        if: steps.key.outputs.present == 'true'
+        env:
+          BASE_SHA: ${{ steps.mb.outputs.merge_base }}
+          STATE_FILE: ${{ runner.temp }}/state.json
+        run: |
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/body.txt"
+          PR_BODY_FILE="$RUNNER_TEMP/body.txt" \
+            ./.github/scripts/agentic/render-brief.sh > "$RUNNER_TEMP/brief.md"
+
+      - name: Install pi
+        if: steps.key.outputs.present == 'true'
+        run: npm install -g "@earendil-works/pi-coding-agent@${PI_VERSION}"
+
+      # Exchange the durable token for a session token and write pi's auth file.
+      # Done here (not inside pi) because pi's own cold exchange intermittently
+      # fails its first model call; a pre-minted token avoids that path.
+      - name: Mint Copilot session token
+        if: steps.key.outputs.present == 'true'
+        env:
+          PI_CODING_AGENT_DIR: ${{ runner.temp }}/pi
+        run: ./.github/scripts/agentic/mint-copilot-token.sh
+
+      - name: Run pr-reviewer (pi via Copilot)
+        if: steps.key.outputs.present == 'true'
+        env:
+          PI_CODING_AGENT_DIR: ${{ runner.temp }}/pi
+        run: |
+          ./.github/scripts/agentic/run-agent.sh \
+            pr-reviewer "$RUNNER_TEMP/findings.json" "$RUNNER_TEMP/brief.md"
+
+      - name: Post comments and reconcile threads
+        id: review
+        if: steps.key.outputs.present == 'true'
+        env:
+          FINDINGS: ${{ runner.temp }}/findings.json
+          STATE_FILE: ${{ runner.temp }}/state.json
+        run: ./.github/scripts/agentic/post-comments.sh
+
+      - name: Publish agentic-review/clean status
+        if: steps.key.outputs.present == 'true'
+        run: |
+          if [ "${{ steps.review.outputs.clean }}" = "true" ]; then
+            STATE=success; DESC="No blocking issues remain."
+          else
+            STATE=failure; DESC="Blocking issues remain; resolve the review threads with fixes."
+          fi
+          gh api "repos/$REPO/statuses/$HEAD_SHA" \
+            -f state="$STATE" \
+            -f context=agentic-review/clean \
+            -f description="$DESC"
+
+  # needs-human is sticky and human-owned. Once set, re-running the escalation
+  # judge wastes a model call and risks a duplicate comment, so gate the whole
+  # job behind this preflight. Fails open (run) on a label read error, since a
+  # missed escalation is worse than one extra run.
+  preflight:
+    name: preflight
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      escalate: ${{ steps.decide.outputs.escalate }}
+    steps:
+      - name: Decide whether to run the escalation judge
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          COPILOT_DURABLE_TOKEN: ${{ secrets.COPILOT_DURABLE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$COPILOT_DURABLE_TOKEN" ]; then
+            echo "COPILOT_DURABLE_TOKEN not configured; escalation judge skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "escalate=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          has="$(gh pr view "$PR_NUMBER" --repo "$REPO" --json labels \
+                  --jq 'any(.labels[].name; . == "needs-human")' 2>/dev/null || echo unknown)"
+          if [ "$has" = "true" ]; then
+            echo "needs-human already set; escalation judge skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "escalate=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "escalate=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  escalation:
+    name: escalation-judge
+    needs: preflight
+    if: needs.preflight.outputs.escalate == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Check model credential
+        id: key
+        run: |
+          if [ -z "$COPILOT_DURABLE_TOKEN" ]; then
+            echo "COPILOT_DURABLE_TOKEN is not configured; escalation judge skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install central LFX skills (best effort)
+        if: steps.key.outputs.present == 'true'
+        continue-on-error: true
+        run: |
+          git clone --depth=1 https://github.com/linuxfoundation/lfx-skills "$RUNNER_TEMP/lfx-skills"
+          "$RUNNER_TEMP/lfx-skills/install.sh"
+
+      - name: Compute merge base
+        id: mb
+        if: steps.key.outputs.present == 'true'
+        run: |
+          if ! git fetch --no-tags origin "$BASE_REF"; then
+            echo "::warning::could not fetch base ref $BASE_REF; falling back to base.sha"
+          fi
+          MB="$(git merge-base FETCH_HEAD "$HEAD_SHA" 2>/dev/null || true)"
+          if [ -z "$MB" ]; then
+            echo "::warning::merge-base via base ref failed; using base.sha"
+            MB="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
+          fi
+          echo "merge_base=$MB" >> "$GITHUB_OUTPUT"
+
+      - name: Render brief
+        if: steps.key.outputs.present == 'true'
+        env:
+          BASE_SHA: ${{ steps.mb.outputs.merge_base }}
+        run: |
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/body.txt"
+          PR_BODY_FILE="$RUNNER_TEMP/body.txt" \
+            ./.github/scripts/agentic/render-brief.sh > "$RUNNER_TEMP/brief.md"
+
+      - name: Install pi
+        if: steps.key.outputs.present == 'true'
+        run: npm install -g "@earendil-works/pi-coding-agent@${PI_VERSION}"
+
+      - name: Mint Copilot session token
+        if: steps.key.outputs.present == 'true'
+        env:
+          PI_CODING_AGENT_DIR: ${{ runner.temp }}/pi
+        run: ./.github/scripts/agentic/mint-copilot-token.sh
+
+      - name: Run escalation judge (pi via Copilot)
+        if: steps.key.outputs.present == 'true'
+        env:
+          PI_CODING_AGENT_DIR: ${{ runner.temp }}/pi
+        run: |
+          ./.github/scripts/agentic/run-agent.sh \
+            escalation-reviewer "$RUNNER_TEMP/escalation.json" "$RUNNER_TEMP/brief.md"
+
+      - name: Apply needs-human verdict
+        if: steps.key.outputs.present == 'true'
+        env:
+          VERDICT: ${{ runner.temp }}/escalation.json
+        run: ./.github/scripts/agentic/apply-verdict.sh

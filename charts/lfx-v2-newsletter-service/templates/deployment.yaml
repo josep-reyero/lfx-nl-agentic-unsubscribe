@@ -1,0 +1,208 @@
+# Copyright The Linux Foundation and each contributor to LFX.
+# SPDX-License-Identifier: MIT
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lfx-v2-newsletter-service.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "lfx-v2-newsletter-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "lfx-v2-newsletter-service.labels" . | nindent 8 }}
+        {{- include "lfx-v2-newsletter-service.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name | default .Chart.Name }}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          env:
+            - name: PORT
+              value: {{ .Values.service.port | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.app.logLevel | quote }}
+            # NATS — used by the email dispatcher, committee member client,
+            # and project metadata client. Newsletter-service makes no HTTP
+            # upstream calls (the previous COMMITTEE_SERVICE_URL was retired
+            # along with the HTTP committee_client because Heimdall-minted
+            # JWTs failed OIDC validation at query-service).
+            - name: NATS_URL
+              value: {{ .Values.app.nats.url | quote }}
+            {{- with .Values.app.nats.timeout }}
+            - name: NATS_TIMEOUT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.app.nats.maxReconnect }}
+            - name: NATS_MAX_RECONNECT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.app.nats.reconnectWait }}
+            - name: NATS_RECONNECT_WAIT
+              value: {{ . | quote }}
+            {{- end }}
+            - name: SEND_FANOUT_ENABLED
+              value: {{ .Values.app.send.fanoutEnabled | quote }}
+            {{- with .Values.app.send.concurrency }}
+            - name: SEND_CONCURRENCY
+              value: {{ . | quote }}
+            {{- end }}
+            - name: REQUIRE_USER_AUTH
+              value: {{ .Values.app.requireUserAuth | quote }}
+            {{- if .Values.app.jwksURL }}
+            - name: JWKS_URL
+              value: {{ .Values.app.jwksURL | quote }}
+            {{- end }}
+            {{- if .Values.app.audience }}
+            - name: JWT_AUDIENCE
+              value: {{ .Values.app.audience | quote }}
+            {{- end }}
+            {{- if or (eq .Values.database.mode "database") (eq .Values.database.mode "cluster+database") }}
+            # Forward the CloudNativePG app-secret fields and the per-service
+            # database name; the app composes DATABASE_URL in-process. This
+            # avoids embedding the cluster-app password as a literal substring
+            # of an env-var value in the pod spec — env-var interpolation
+            # would resolve $(PGPASSWORD) and make the password visible via
+            # `kubectl describe pod` even though the source is a Secret.
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lfx-v2-newsletter-service.cloudNativePGAppSecret" . }}
+                  key: host
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lfx-v2-newsletter-service.cloudNativePGAppSecret" . }}
+                  key: port
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lfx-v2-newsletter-service.cloudNativePGAppSecret" . }}
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lfx-v2-newsletter-service.cloudNativePGAppSecret" . }}
+                  key: password
+            - name: PGDATABASE
+              value: {{ .Values.database.cloudNativePG.databaseName | quote }}
+            {{- else if eq (default "url" .Values.database.external.shape) "fields" }}
+            # External Postgres referenced by a multi-key Secret (e.g. an
+            # ExternalSecret that pulls /cloudops/rds-managed/lfx-v2/<service>
+            # from AWS Secrets Manager and exposes each JSON field as its own
+            # Secret key). Same env-var-leak avoidance as the CNPG path:
+            # the app composes DATABASE_URL in-process.
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.external.secretName }}
+                  key: {{ default "host" .Values.database.external.keys.host }}
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.external.secretName }}
+                  key: {{ default "port" .Values.database.external.keys.port }}
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.external.secretName }}
+                  key: {{ default "username" .Values.database.external.keys.username }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.external.secretName }}
+                  key: {{ default "password" .Values.database.external.keys.password }}
+            - name: PGDATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.external.secretName }}
+                  key: {{ default "dbname" .Values.database.external.keys.dbname }}
+            {{- else }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.external.secretName }}
+                  key: {{ .Values.database.external.secretKey }}
+            {{- end }}
+            {{- with .Values.app.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- $otelServiceName := .Values.app.otel.serviceName | toString | trim }}
+            {{- if ne $otelServiceName "" }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ $otelServiceName | quote }}
+            {{- end }}
+            {{- $otelEndpoint := .Values.app.otel.endpoint | toString | trim }}
+            {{- if ne $otelEndpoint "" }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ $otelEndpoint | quote }}
+            {{- end }}
+            {{- $otelProtocol := .Values.app.otel.protocol | toString | trim }}
+            {{- if ne $otelProtocol "" }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: {{ $otelProtocol | quote }}
+            {{- end }}
+            {{- $otelInsecure := .Values.app.otel.insecure | toString | trim }}
+            {{- if ne $otelInsecure "" }}
+            - name: OTEL_EXPORTER_OTLP_INSECURE
+              value: {{ $otelInsecure | quote }}
+            {{- end }}
+            {{- $otelTracesExporter := .Values.app.otel.tracesExporter | toString | trim }}
+            {{- if ne $otelTracesExporter "" }}
+            - name: OTEL_TRACES_EXPORTER
+              value: {{ $otelTracesExporter | quote }}
+            {{- end }}
+            {{- $otelPropagators := .Values.app.otel.propagators | toString | trim }}
+            {{- if ne $otelPropagators "" }}
+            - name: OTEL_PROPAGATORS
+              value: {{ $otelPropagators | quote }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            failureThreshold: 3
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            failureThreshold: 1
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            failureThreshold: 30
+            periodSeconds: 2
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
