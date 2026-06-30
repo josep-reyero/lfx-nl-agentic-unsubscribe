@@ -84,13 +84,12 @@ Three sources, each authoritative for its own domain:
      entire authorization model), a NATS peer contract (owned by the peer
      service), or the dispatch path (real email to real recipients). Verify a
      moved contract against its owner, never against the PR's claims.
-3. **Judge the implementation.** Apply the **newsletter-code-review** skill on any
-   code change: correctness, error handling, tests, performance, readability, code
-   truthfulness, and the repo's documented standards. Apply the
-   **newsletter-security-review** skill whenever the diff touches a handler, auth,
-   persistence, the dispatch path, recipient data, config, or the chart. These two
-   skills carry the service-specific review method, not generic advice; load and
-   follow them.
+3. **Judge the implementation.** Run `/newsletter-code-review` on any code change:
+   correctness, error handling, tests, performance, readability, code truthfulness,
+   and the repo's documented standards. Run `/newsletter-security-review` whenever
+   the diff touches a handler, auth, persistence, the dispatch path, recipient
+   data, config, or the chart. These two skills carry the service-specific review
+   method, not generic advice; load and follow them.
 
 ## How you post your findings
 
@@ -101,9 +100,9 @@ using the GitHub tools available to you, on the pull request under review:
   in the PR diff. Begin every inline comment with its severity in brackets, for
   example `[high] ...`.
 - **One summary comment.** State what the PR intends and your overall assessment
-  of whether it does it well. List which skills you consulted (the
-  `newsletter-code-review` and `newsletter-security-review` skills, and any
-  central `lfx` / `lfx-platform-architecture` skill you read via the GitHub MCP),
+  of whether it does it well. List which skills you consulted (`/newsletter-code-review`
+  and `/newsletter-security-review`, and any central `lfx` /
+  `lfx-platform-architecture` skill you read via the GitHub MCP),
   so it is clear the service-specific method was applied. When the change handles
   something well (a tricky edge case, a clean migration), say so.
 

@@ -44,13 +44,13 @@ A break here lands in a repo this PR cannot show you, so lean on the skills.
 - **`pkg/api`.** Imported by other repos; its JSON shapes mirror the Self Serve
   interfaces, and the version / `If-Match` concurrency surface is part of it.
   Changing shapes, casing, status codes, or concurrency semantics. Confirm
-  consumers with the central `lfx` skill.
+  consumers with the `lfx` skill (`skills/lfx/SKILL.md` in `linuxfoundation/lfx-skills`).
 - **The schema** (`internal/schema/`). Encodes the invariants every deployed pod
   assumes: the draft-to-sent state machine, sent-requires-a-group-id, token and
   hash formats, cascade deletes, the idempotent lock-serialized apply.
 - **NATS contracts.** Peers own the subjects this service calls (committee,
   project, email, auth). Changing a request or reply shape from this side, or
-  adding a peer dependency. Resolve ownership with the central `lfx` skill.
+  adding a peer dependency. Resolve ownership with the `lfx` skill (`skills/lfx/SKILL.md` in `linuxfoundation/lfx-skills`).
 
 ## Sending behavior
 
@@ -79,7 +79,8 @@ handlers at once does.
 
 Changes under `.github/`, to the chart (`charts/`, carrying the Heimdall RuleSet
 and network policy), to `CODEOWNERS` or the build toolchain, or to the PR agents'
-own config (the review skills and instructions themselves) change how code
-reaches production or gets reviewed. A new dependency, or a version bump in the
-auth path or to a pinned LFX module this service couples to, shifts the supply
-chain. Routine patch and minor bumps of uninvolved dependencies do not.
+own config (the `agents/` brains, the `.github/skills/` review skills, and the
+review instructions) change how code reaches production or gets reviewed. A new
+dependency, or a version bump in the auth path or to a pinned LFX module this
+service couples to, shifts the supply chain. Routine patch and minor bumps of
+uninvolved dependencies do not.

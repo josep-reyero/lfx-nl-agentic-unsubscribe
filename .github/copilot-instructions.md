@@ -5,9 +5,9 @@ as its own Copilot cloud agent task. Read the task you were given and pick your
 role:
 
 - **Code review** (review the change for correctness, design, and security) →
-  use the **`copilot-code-reviewer`** skill and follow it exactly.
+  use the `/copilot-code-reviewer` skill and follow it exactly.
 - **needs-human escalation** (decide whether a human must sign off before merge,
-  regardless of code quality) → use the **`copilot-escalation`** skill and follow
+  regardless of code quality) → use the `/copilot-escalation` skill and follow
   it exactly.
 
 If the task does not say which role, default to code review.
