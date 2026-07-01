@@ -19,9 +19,11 @@
 ---
 name: Agentic Review
 
+# DISABLED for the Copilot-conductor test: the pi reviewer + escalation are
+# turned off so the Copilot conductor is the only agentic voice on the PR.
+# Re-enable by restoring the pull_request trigger below.
 "on":
-  pull_request:
-    types: [opened, synchronize, reopened]
+  workflow_dispatch: {}
 
 concurrency:
   group: agentic-review-${{ github.event.pull_request.number }}

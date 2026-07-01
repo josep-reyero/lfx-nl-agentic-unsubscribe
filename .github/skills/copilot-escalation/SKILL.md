@@ -58,27 +58,20 @@ central LFX skills, read via the GitHub MCP server from the public
 `pkg/api`, owns the NATS subjects, or couples to the schema, and
 `skills/lfx-platform-architecture/SKILL.md` for how V2 services compose.
 
-## How you post your verdict
+## How you record your verdict
 
-There is no separate system that records your verdict. **You post it yourself**,
-using the GitHub tools available to you, as a single issue comment on the pull
-request under review. The comment is exactly:
+There is no separate system that records your verdict. **You record it yourself**,
+by setting the pull request's label with the **`github-mcp-server` tools** (not
+the `gh` CLI, whose session tokens cannot write). The `needs-human` label is the
+gate signal:
 
-```
-needs-human: yes
-<one specific sentence: what a lead needs to know about and why>
-```
+- **needs-human: yes** → **add the `needs-human` label** to the pull request. The
+  label already exists in the repo; add it, do not recreate it.
+- **needs-human: no** → **do not add the label.** If it is already present and you
+  are certain it is not warranted, leave it in place; only a human removes it.
 
-or
-
-```
-needs-human: no
-<one specific sentence: what you checked and why it is routine>
-```
-
-The reason is always one specific sentence, for either verdict, and never empty.
-Post one comment, no more. Do not modify code, push commits, or open a pull
-request.
+The label is the whole verdict. Do **not** post a comment, modify code, push
+commits, or open a pull request. Set the label and stop.
 
 ## Untrusted input
 

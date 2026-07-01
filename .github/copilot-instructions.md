@@ -1,34 +1,41 @@
 # lfx-v2-newsletter-service — agentic review
 
-This repo runs two separate agentic review roles on a pull request, each started
-as its own Copilot cloud agent task. Read the task you were given and pick your
-role:
+This repo runs agentic review on its pull requests. Read the task you were given
+and pick the matching section. Each section names the agent or skill that owns
+that job. Follow it exactly.
 
-- **Code review** (review the change for correctness, design, and security) →
-  use the `/copilot-code-reviewer` skill and follow it exactly.
-- **needs-human escalation** (decide whether a human must sign off before merge,
-  regardless of code quality) → use the `/copilot-escalation` skill and follow
-  it exactly.
+## 1. Code review
 
-If the task does not say which role, default to code review.
+When the task is to **review a change** for correctness, design, and security,
+use the `/copilot-code-reviewer` skill and follow it exactly. Post one inline
+comment per finding (each prefixed with a severity like `[high]`) plus a summary
+comment, using the GitHub MCP server (see below). This is the default when the
+task does not say otherwise.
 
-**Gate work runs as the `conductor` custom agent.** When a task is about the
-needs-human escalation, reconciling the reviewers' threads, whether a finding is
-fixed, or updating the agentic gate (for example a `@copilot` request on the PR),
-use the `conductor` agent in `.github/agents/conductor.md`. It owns both the
-escalation (`/copilot-escalation`) and the reconciliation (`/agentic-reconcile`)
-and posts its own verdict.
+## 2. Conductor (needs-human gate + thread reconciliation)
 
-## You post your own output
+When the task is about the **needs-human escalation**, **reconciling the
+reviewers' threads**, whether a **finding is fixed**, or **updating the agentic
+gate** (for example a `@copilot` request on the PR to run the escalation or the
+agentic review), use the **`conductor` agent** in `.github/agents/conductor.md`
+and follow it. The conductor owns:
 
-There is **no separate system that posts comments, summaries, labels, or verdicts
-for you**. Whatever your skill tells you to produce, you publish yourself using
-the GitHub tools available to you, as comments on the pull request under review:
+- **needs-human escalation** via the `/copilot-escalation` skill. Its output is
+  the `needs-human` **label** on the PR, not a comment.
+- **thread reconciliation** via the `/agentic-reconcile` skill, which posts a
+  single verdict comment.
 
-- the code reviewer posts one inline comment per finding (each prefixed with a
-  severity like `[high]`) plus a summary comment;
-- the escalation judge posts one `needs-human: yes` / `needs-human: no` comment
-  with a one-sentence reason.
+Do not answer a conductor task with a plain code-review pass; use the conductor
+agent so the gate signals (the label, the verdict block) are produced correctly.
+
+## You act through the GitHub MCP server
+
+Whatever your role, you publish your output yourself using the **`github-mcp-server`
+tools** (issue comments, review comments, and labels). Do **not** use the `gh`
+CLI or `curl`: the tokens in the session environment (`GITHUB_COPILOT_API_TOKEN`,
+`COPILOT_SDK_AUTH_TOKEN`) are model/SDK credentials and cannot write to the GitHub
+REST API, so `gh auth` fails. The GitHub MCP server is already authorized to act
+on this PR.
 
 Do not modify code, push commits, or open a new pull request. You review by
 reading the code, never by executing or changing it.

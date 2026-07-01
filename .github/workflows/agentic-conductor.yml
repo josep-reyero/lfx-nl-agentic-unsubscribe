@@ -1,0 +1,44 @@
+# Copyright The Linux Foundation and each contributor to LFX.
+# SPDX-License-Identifier: MIT
+#
+# Trigger workflow for the Copilot conductor. It posts a single, generic
+# @copilot comment on the PR; the repository copilot-instructions route that to
+# the `conductor` agent, which runs the needs-human escalation and sets the
+# needs-human label. The comment must be authored by a user with write access and
+# a Copilot seat, so it uses a PAT secret (CONDUCTOR_TRIGGER_PAT). A default
+# GITHUB_TOKEN / github-actions[bot] comment is ignored by Copilot, so it cannot
+# be used here.
+---
+name: Agentic Conductor (trigger)
+
+"on":
+  pull_request:
+    types: [opened, reopened]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to run the conductor on"
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: conductor-trigger-${{ github.event.pull_request.number || github.event.inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  trigger-conductor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post @copilot conductor directive
+        env:
+          GH_TOKEN: ${{ secrets.CONDUCTOR_TRIGGER_PAT }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number || github.event.inputs.pr }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::CONDUCTOR_TRIGGER_PAT is not set. Copilot ignores comments from the default GITHUB_TOKEN, so a user PAT with write access and a Copilot seat is required." >&2
+            exit 1
+          fi
+          gh pr comment "$PR" --repo "$REPO" \
+            --body "@copilot Run the needs-human escalation for this pull request, following the repository instructions, and apply the needs-human gate."
