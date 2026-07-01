@@ -40,5 +40,7 @@ jobs:
             echo "::error::REVIEWER_PAT is not set. Copilot ignores comments from the default GITHUB_TOKEN, so a user PAT with write access and a Copilot seat is required." >&2
             exit 1
           fi
-          gh pr comment "$PR" --repo "$REPO" \
-            --body "@copilot Run the needs-human escalation for this pull request, following the repository instructions, and apply the needs-human gate."
+          # Use the REST API (not `gh pr comment`, which resolves the repo via
+          # GraphQL and frequently fails for fine-grained PATs).
+          gh api "repos/$REPO/issues/$PR/comments" \
+            -f body="@copilot Run the needs-human escalation for this pull request, following the repository instructions, and apply the needs-human gate."
