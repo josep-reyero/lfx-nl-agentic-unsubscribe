@@ -3,16 +3,22 @@
 #
 # Reactive write layer. The escalation task and the @copilot conductor produce only
 # comments; every GitHub write is done here, keyed to a comment authored by the
-# coding agent (copilot-swe-agent) so a developer cannot forge a verdict:
+# trusted agent identity so a developer cannot forge a verdict:
 #   - a `needs-human: yes` comment  -> set the sticky needs-human label
 #   - an `<!-- agentic:check v1 -->` block -> resolve the threads it marks fixed /
 #     rebutted-valid, and set the agentic-review/clean commit status on the head.
 #
+# TRUST IDENTITY: the agents post via the writable GitHub MCP, which authenticates
+# with the COPILOT_MCP_GITHUB_PERSONAL_ACCESS_TOKEN, so their comments are authored
+# by that PAT's OWNER (not copilot-swe-agent). In production that PAT MUST belong to
+# a dedicated machine account no developer controls, so these comments are
+# unforgeable. In this test the owner is josep-reyero (also the PR author), so the
+# boundary is degenerate self-trust — fine for validating the plumbing only.
+#
 # This runs on the agent's own comment (triggering actor = Copilot). It works only
 # because the repo has "require approval for Copilot workflow runs" turned OFF; that
-# is what lets us react to the agent's comment instead of polling. It runs from the
-# default branch (trusted code, not anything the agent wrote), and trusts only
-# copilot-swe-agent-authored comments.
+# is what lets us react instead of polling. It runs from the default branch (trusted
+# code, not anything the agent wrote).
 #
 # Writes use REVIEWER_PAT_GENERAL (needs Issues, Pull requests, and Commit statuses
 # read/write). The comment body is passed via env, never interpolated into the run
@@ -32,10 +38,11 @@ concurrency:
 
 jobs:
   apply:
-    # Only PR comments authored by the coding agent are trusted.
+    # Only PR comments authored by the trusted agent identity (the MCP PAT owner)
+    # are acted on. Production: a dedicated machine account. Test: josep-reyero.
     if: >-
       github.event.issue.pull_request != null &&
-      github.event.comment.user.login == 'copilot-swe-agent'
+      github.event.comment.user.login == 'josep-reyero'
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.REVIEWER_PAT_GENERAL }}
