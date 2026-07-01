@@ -1,19 +1,20 @@
 # Copyright The Linux Foundation and each contributor to LFX.
 # SPDX-License-Identifier: MIT
 #
-# On PR open, three things:
-#   1. Request the native Copilot code review (so review threads appear for the
-#      conductor to reconcile later).
-#   2. Initialise a gpt-5.5 session on the PR via an Agent Tasks API task. The task
-#      does NO work: it only tells Copilot it will be working on this PR, which
-#      creates the first session pinned to gpt-5.5. The API session's GitHub MCP is
-#      read-only, so it cannot post; its sole purpose is to seed the model.
-#   3. Once that session exists, post an @copilot comment that CONTINUES it (so it
-#      runs on gpt-5.5) and runs the needs-human escalation. The @copilot path gets
-#      a write-capable MCP, so the escalation agent can post its verdict comment.
-# Later @copilot conductor runs on the same PR continue this gpt-5.5 session too.
-# All calls are authored by a user with write + a Copilot seat (REVIEWER_PAT);
-# GITHUB_TOKEN cannot request the reviewer, start a task, or drive @copilot.
+# On PR open: request the native Copilot code review, then run the needs-human
+# escalation as an Agent Tasks API task pinned to gpt-5.5. The task talks to the
+# repo's writable GitHub MCP (github-comment / add_issue_comment), so the escalation
+# agent posts its own verdict comment. This workflow then polls the task to
+# completion, reads that verdict, and sets the sticky needs-human label itself.
+#
+# The label write lives here (a workflow triggered by the human's PR-open event),
+# NOT in a workflow triggered by the agent's comment: GitHub gates any run whose
+# triggering actor is Copilot as action_required, so agent-triggered writes never
+# run unattended. Polling is how this un-gated workflow observes the agent's output.
+#
+# Runs as REVIEWER_PAT_GENERAL (write + Copilot seat + Commit statuses/PR write for
+# the deterministic writes). This is a different, more powerful token than the
+# agent's MCP token, which can only read and comment.
 ---
 name: Agentic Escalation (open)
 
@@ -35,10 +36,11 @@ jobs:
       REPO: ${{ github.repository }}
       PR: ${{ github.event.pull_request.number }}
       HEAD_REF: ${{ github.event.pull_request.head.ref }}
+      BASE_REF: ${{ github.event.pull_request.base.ref }}
     steps:
       - name: Guard PAT
         run: |
-          [ -n "$GH_TOKEN" ] || { echo "::error::REVIEWER_PAT_GENERAL not set (needs a user PAT with write + Copilot seat)."; exit 1; }
+          [ -n "$GH_TOKEN" ] || { echo "::error::REVIEWER_PAT_GENERAL not set"; exit 1; }
 
       - name: Request native Copilot code review
         run: |
@@ -46,39 +48,43 @@ jobs:
             -f "reviewers[]=copilot-pull-request-reviewer[bot]" || \
             echo "::warning::could not request the Copilot reviewer (already requested, or review not enabled)"
 
-      - name: Initialise gpt-5.5 session (Agent Tasks API seed)
-        id: seed
+      - name: Escalation task (gpt-5.5) -> poll -> set sticky needs-human label
         run: |
+          set -u
           TID=$(gh api "/agents/repos/$REPO/tasks" \
-            -H "X-GitHub-Api-Version: 2026-03-10" \
-            --method POST \
-            -f model=gpt-5.5 \
-            -F create_pull_request=false \
-            -f base_ref=main \
-            -f head_ref="$HEAD_REF" \
-            -f prompt="You will be working on pull request #$PR in $REPO as its agentic reviewer. Acknowledge that you are set up to work on this pull request. Do not review, comment, label, or change anything yet: this message only initialises your session. You will receive follow-up instructions on the pull request." \
+            -H "X-GitHub-Api-Version: 2026-03-10" --method POST \
+            -f model=gpt-5.5 -F create_pull_request=false \
+            -f base_ref="$BASE_REF" -f head_ref="$HEAD_REF" \
+            -f prompt="Run the needs-human escalation for pull request #$PR in $REPO, following the repository instructions exactly. Post your machine-readable needs-human verdict comment using the add_issue_comment tool." \
             --jq '.id')
-          echo "seed task: $TID"
-          echo "tid=$TID" >> "$GITHUB_OUTPUT"
+          echo "escalation task: $TID"
 
-      - name: Wait for the session to establish
-        env:
-          TID: ${{ steps.seed.outputs.tid }}
-        run: |
-          [ -n "$TID" ] || { echo "::warning::no seed task id; skipping wait"; exit 0; }
-          for i in $(seq 1 48); do   # up to ~12 min
-            STATE=$(gh api "/agents/tasks/$TID" -H "X-GitHub-Api-Version: 2026-03-10" --jq '.state' 2>/dev/null || echo "?")
-            echo "seed state: $STATE"
-            case "$STATE" in
-              completed) echo "session established"; exit 0 ;;
-              failed|cancelled|error) echo "::warning::seed ended as $STATE; continuing"; exit 0 ;;
+          for i in $(seq 1 60); do   # up to ~15 min
+            ST=$(gh api "/agents/tasks/$TID" -H "X-GitHub-Api-Version: 2026-03-10" --jq '.state' 2>/dev/null || echo "?")
+            echo "task state: $ST"
+            case "$ST" in
+              completed) break ;;
+              failed|cancelled|error) echo "::warning::escalation task ended as $ST"; break ;;
             esac
             sleep 15
           done
-          echo "::warning::seed did not complete within the wait; the @copilot session may not inherit gpt-5.5"
 
-      - name: Post @copilot escalation directive
-        run: |
-          gh api "repos/$REPO/issues/$PR/comments" \
-            -f body="@copilot Run the needs-human escalation for this pull request, following the repository instructions, and post your machine-readable needs-human verdict comment." \
-            --jq '.html_url'
+          BODY=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq '[.[] | select(.user.login=="copilot-swe-agent" and (.body|test("needs-human:";"i")))] | last | .body // ""')
+          if [ -z "$BODY" ]; then
+            echo "::warning::no needs-human verdict comment found; not labelling"
+            exit 0
+          fi
+          echo "verdict: $(printf '%s' "$BODY" | grep -iE 'needs-human:' | head -1)"
+
+          if printf '%s' "$BODY" | grep -qiE 'needs-human:[[:space:]]*yes'; then
+            present=$(gh api "repos/$REPO/issues/$PR/labels" --jq '[.[].name] | index("needs-human")')
+            if [ "$present" = "null" ] || [ -z "$present" ]; then
+              gh api --method POST "repos/$REPO/issues/$PR/labels" -f "labels[]=needs-human"
+              echo "needs-human label set"
+            else
+              echo "needs-human already present (sticky) — no-op"
+            fi
+          else
+            echo "needs-human: no — no label"
+          fi

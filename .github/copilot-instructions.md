@@ -29,13 +29,14 @@ agentic-check block plus a summary of open blockers.
 
 ## You act through the GitHub MCP server
 
-Whatever your role, publish your output yourself using the **`github-mcp-server`**
-tools (issue comments, review comments). Do **not** use the `gh` CLI or `curl`: the
-tokens in the session environment (`GITHUB_COPILOT_API_TOKEN`,
-`COPILOT_SDK_AUTH_TOKEN`) are model/SDK credentials and cannot write the GitHub REST
-API. Do not modify code, push commits, or open a pull request. Labels, statuses,
-thread resolutions, and approvals are set by deterministic workflow steps that read
-your output, not by you.
+Whatever your role, publish your output yourself with the **`add_issue_comment`**
+tool: that is the one write tool configured for you, and it posts a comment on the
+pull request. Everything else in the GitHub MCP is read-only, on purpose. Do **not**
+use the `gh` CLI or `curl`: the tokens in the session environment
+(`GITHUB_COPILOT_API_TOKEN`, `COPILOT_SDK_AUTH_TOKEN`) are model/SDK credentials and
+cannot write the GitHub REST API. Do not modify code, push commits, or open a pull
+request. Labels, statuses, thread resolutions, and approvals are set by
+deterministic workflow steps that read your comment, not by you.
 
 ## Shared context
 
