@@ -11,9 +11,9 @@
 ---
 name: Agentic Conductor (trigger)
 
+# Auto pull_request trigger disabled during the API-first session test, so the
+# API task is genuinely the first session on the PR. Manual dispatch only.
 "on":
-  pull_request:
-    types: [opened, reopened]
   workflow_dispatch:
     inputs:
       pr:
