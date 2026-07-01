@@ -12,6 +12,13 @@ role:
 
 If the task does not say which role, default to code review.
 
+**Gate work runs as the `conductor` custom agent.** When a task is about the
+needs-human escalation, reconciling the reviewers' threads, whether a finding is
+fixed, or updating the agentic gate (for example a `@copilot` request on the PR),
+use the `conductor` agent in `.github/agents/conductor.md`. It owns both the
+escalation (`/copilot-escalation`) and the reconciliation (`/agentic-reconcile`)
+and posts its own verdict.
+
 ## You post your own output
 
 There is **no separate system that posts comments, summaries, labels, or verdicts
