@@ -40,6 +40,9 @@ jobs:
             echo "::error::REVIEWER_PAT is not set. Copilot ignores comments from the default GITHUB_TOKEN, so a user PAT with write access and a Copilot seat is required." >&2
             exit 1
           fi
+          # Diagnostics (never prints the token): who is this token, and can it see the repo?
+          echo "authed as: $(gh api user --jq '.login' 2>&1 | tail -1)"
+          echo "repo visible: $(gh api "repos/$REPO" --jq '.full_name' 2>&1 | tail -1)"
           # Use the REST API (not `gh pr comment`, which resolves the repo via
           # GraphQL and frequently fails for fine-grained PATs).
           gh api "repos/$REPO/issues/$PR/comments" \
