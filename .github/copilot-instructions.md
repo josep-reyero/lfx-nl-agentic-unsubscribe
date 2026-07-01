@@ -30,8 +30,10 @@ with a machine-readable agentic-check block plus a summary of open blockers.
 ## You act through the GitHub MCP server
 
 Whatever your role, publish your output yourself with the **`add_issue_comment`**
-tool: that is the one write tool configured for you, and it posts a comment on the
-pull request. Everything else in the GitHub MCP is read-only, on purpose. Do **not**
+tool, which posts a comment on the pull request. The conductor also has
+**`add_reply_to_pull_request_comment`** to reply on a review thread (to explain why a
+thread is now resolved, or why it still blocks). Those are the only write tools
+configured for you; everything else in the GitHub MCP is read-only, on purpose. Do **not**
 use the `gh` CLI or `curl`: the tokens in the session environment
 (`GITHUB_COPILOT_API_TOKEN`, `COPILOT_SDK_AUTH_TOKEN`) are model/SDK credentials and
 cannot write the GitHub REST API. Do not modify code, push commits, or open a pull

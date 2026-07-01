@@ -69,16 +69,24 @@ jobs:
           CLEAN=$(printf '%s' "$BODY" | grep -iE 'clean:[[:space:]]*(true|false)' | head -1 | grep -oiE 'true|false' | tr 'A-Z' 'a-z')
           echo "head=$HEAD_SHA clean=$CLEAN"
 
-          # Resolve threads the conductor marked fixed or rebutted-valid.
+          # Act on each thread the conductor listed. Non-blocking states get resolved;
+          # still-blocking states get re-opened if they were resolved prematurely, so
+          # the thread state can never contradict the gate (which reads this block).
           printf '%s\n' "$BODY" | grep -E '^[[:space:]]*-[[:space:]]*id:' | while IFS= read -r line; do
             tid=$(printf '%s' "$line" | sed -nE 's/.*id:[[:space:]]*([^[:space:]]+).*/\1/p')
             st=$(printf '%s' "$line" | sed -nE 's/.*status:[[:space:]]*([^[:space:]]+).*/\1/p')
             case "$st" in
-              fixed|rebutted-valid)
+              fixed|obsolete|rebutted-valid)
                 if gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id="$tid" >/dev/null 2>&1; then
                   echo "resolved $tid ($st)"
                 else
                   echo "::warning::could not resolve thread $tid"
+                fi ;;
+              outstanding|rebutted-invalid)
+                if gh api graphql -f query='mutation($id:ID!){unresolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id="$tid" >/dev/null 2>&1; then
+                  echo "kept open $tid ($st)"
+                else
+                  echo "::warning::could not unresolve thread $tid"
                 fi ;;
               *) : ;;
             esac

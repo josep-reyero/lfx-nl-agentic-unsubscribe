@@ -1,11 +1,12 @@
 # Copyright The Linux Foundation and each contributor to LFX.
 # SPDX-License-Identifier: MIT
 #
-# On PR open: request the native Copilot code review, then fire the needs-human
-# escalation as an Agent Tasks API task pinned to gpt-5.5. This one task does two
-# jobs at once: it is the FIRST session on the PR, so it seeds the gpt-5.5 session
-# that later @copilot conductor runs continue, and it runs the escalation and posts
-# its needs-human verdict comment via the writable GitHub MCP (add_issue_comment).
+# On PR open: fire the needs-human escalation as an Agent Tasks API task pinned to
+# gpt-5.5. This one task does two jobs at once: it is the FIRST session on the PR, so
+# it seeds the gpt-5.5 session that later @copilot conductor runs continue, and it
+# runs the escalation and posts its needs-human verdict comment via the writable
+# GitHub MCP (add_issue_comment). The native review is requested by agentic-conductor,
+# which also waits for it before reconciling.
 #
 # We do NOT poll or wait here. The repo has "require approval for Copilot workflow
 # runs" turned OFF, so the agent's own comment triggers agentic-apply.yml, which
@@ -39,12 +40,6 @@ jobs:
       - name: Guard PAT
         run: |
           [ -n "$GH_TOKEN" ] || { echo "::error::REVIEWER_PAT_GENERAL not set"; exit 1; }
-
-      - name: Request native Copilot code review
-        run: |
-          gh api --method POST "repos/$REPO/pulls/$PR/requested_reviewers" \
-            -f "reviewers[]=copilot-pull-request-reviewer[bot]" || \
-            echo "::warning::could not request the Copilot reviewer (already requested, or review not enabled)"
 
       - name: Fire escalation task (gpt-5.5) — seeds the session and posts the verdict
         run: |

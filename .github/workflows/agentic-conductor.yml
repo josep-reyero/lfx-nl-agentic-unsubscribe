@@ -1,58 +1,85 @@
 # Copyright The Linux Foundation and each contributor to LFX.
 # SPDX-License-Identifier: MIT
 #
-# Mentions @copilot to run the pr-conductor: reconcile the AI-reviewer threads and
-# post a machine-readable agentic-check comment. The @copilot mention continues the
-# gpt-5.5 session the escalation task seeded on this PR, so the conductor runs on
-# gpt-5.5, and the repo copilot-instructions route the task to the /pr-conductor
-# skill. agentic-apply.yml then reacts to the posted comment (no polling here).
+# Runs the pr-conductor after each review round: it re-requests the native review for
+# the new head, waits (polling, read-only) until every AI reviewer has posted for the
+# CURRENT commit, then mentions @copilot once to reconcile the threads. The @copilot
+# mention continues the gpt-5.5 session the escalation task seeded on this PR, and the
+# repo copilot-instructions route it to the /pr-conductor skill. agentic-apply.yml
+# then reacts to the posted agentic-check comment.
 #
-# Triggers:
-#   pull_request_review submitted by a bot reviewer -> the review round finished:
-#     run the conductor (the BASELINE on the first review, a re-check on later ones).
-#   synchronize -> a new commit was pushed: re-check whether findings are now fixed.
-#   review comment from a human -> a developer rebuttal to re-adjudicate.
-# It does NOT run on open (nothing to reconcile until the reviewers have posted).
+# Why trigger on the developer events (opened, synchronize) and POLL for the reviews,
+# instead of triggering on pull_request_review: every event from the Copilot review
+# bot (copilot-pull-request-reviewer) is gated action_required — the "require approval
+# for Copilot workflow runs" toggle covers the coding agent (copilot-swe-agent), not
+# the review bot. Developer events are un-gated, so we start freely and observe the
+# review rather than being triggered by it.
 #
-# Runs as REVIEWER_PAT_GENERAL (write + a Copilot seat, to drive @copilot).
+# Runs as REVIEWER_PAT_GENERAL (write + a Copilot seat, to request reviewers and drive
+# @copilot).
 ---
 name: Agentic Conductor (reconcile)
 
 "on":
   pull_request:
-    types: [synchronize]
-  pull_request_review:
-    types: [submitted]
+    types: [opened, reopened, synchronize]
 
 permissions: {}
 
 concurrency:
+  # Per PR, cancel in progress: if a newer commit lands mid-poll, abandon this run and
+  # let the new head's run take over, so we never fire a conductor for a stale head.
   group: agentic-conductor-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   reconcile:
-    # A new commit (synchronize) always; a submitted review only from a bot reviewer
-    # (the native Copilot review / pi finishing). We do NOT trigger on individual
-    # review comments: the code-review bot's inline comments would each spawn a run
-    # gated as action_required (the coding-agent approval toggle does not cover the
-    # review bot). Developer rebuttals are read by the conductor whenever it next
-    # runs, so nothing is lost.
-    if: >-
-      (github.event_name == 'pull_request') ||
-      (github.event_name == 'pull_request_review' && github.event.review.user.type == 'Bot')
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.REVIEWER_PAT_GENERAL }}
       REPO: ${{ github.repository }}
       PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - name: Guard PAT
         run: |
           [ -n "$GH_TOKEN" ] || { echo "::error::REVIEWER_PAT_GENERAL not set"; exit 1; }
 
+      - name: Request the native review for the current head
+        run: |
+          # On a new commit the diff changed, so this triggers a fresh pass; on open it
+          # is the first request. Best-effort: it may already be requested.
+          gh api --method POST "repos/$REPO/pulls/$PR/requested_reviewers" \
+            -f "reviewers[]=copilot-pull-request-reviewer[bot]" >/dev/null 2>&1 \
+            && echo "requested native review" \
+            || echo "::notice::native review not (re-)requested (already pending, or unchanged diff)"
+
+      - name: Wait for all AI reviewers to finish for the current head
+        run: |
+          # AI reviewers to wait for, as login regexes. Add 'github-actions' when pi is
+          # enabled on the repo. We wait only for AI reviewers; humans review on their
+          # own clock and the conductor never touches human threads.
+          REVIEWERS='copilot-pull-request-reviewer'
+          echo "waiting for [$REVIEWERS] to review head $HEAD_SHA"
+          missing="$REVIEWERS"
+          for _ in $(seq 1 48); do   # ~12 min at 15s
+            missing=""
+            for rv in $REVIEWERS; do
+              done_n=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
+                --jq "[.[] | select((.user.login|test(\"$rv\";\"i\")) and .commit_id==\"$HEAD_SHA\")] | length" \
+                2>/dev/null || echo 0)
+              [ "${done_n:-0}" -gt 0 ] || missing="$missing $rv"
+            done
+            if [ -z "$missing" ]; then echo "all AI reviewers done for head"; break; fi
+            echo "  still waiting on:$missing"
+            sleep 15
+          done
+          if [ -n "$missing" ]; then
+            echo "::warning::timed out waiting for reviewers:$missing — firing conductor with the reviews present"
+          fi
+
       - name: Mention @copilot to run the pr-conductor
         run: |
           gh api "repos/$REPO/issues/$PR/comments" \
-            -f body="@copilot Reconcile the AI-reviewer threads on this pull request against the latest commits and any developer replies, following the repository instructions." \
+            -f body="@copilot Reconcile the AI-reviewer threads on this pull request against the latest commit and any developer replies, following the repository instructions." \
             --jq '.html_url'
