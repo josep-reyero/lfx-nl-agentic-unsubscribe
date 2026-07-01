@@ -32,7 +32,7 @@ jobs:
     steps:
       - name: Post @copilot conductor directive
         env:
-          GH_TOKEN: ${{ secrets.REVIEWER_PAT }}
+          GH_TOKEN: ${{ secrets.REVIEWER_PAT_GENERAL }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number || github.event.inputs.pr }}
         run: |
