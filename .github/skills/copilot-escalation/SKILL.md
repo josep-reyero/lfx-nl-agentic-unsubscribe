@@ -61,19 +61,22 @@ central LFX skills, read via the GitHub MCP server from the public
 ## How you record your verdict
 
 There is no separate system that records your verdict. **You record it yourself**,
-by setting the pull request's label with the **`github-mcp-server` tools** (not
-the `gh` CLI, whose session tokens cannot write). The `needs-human` label is the
-gate signal:
+by setting the pull request's `needs-human` label with the **`github-mcp-server`
+tools** (not the `gh` CLI, whose session tokens cannot write). The label is the
+gate signal, and it is **set once and sticky**:
 
-- **needs-human: yes** → **add the `needs-human` label** to the pull request. The
-  label already exists in the repo; add it, do not recreate it.
-- **needs-human: no** → **do not add the label.** If it is already present and you
-  are certain it is not warranted, leave it in place; only a human removes it.
+- **needs-human: yes** → if the `needs-human` label is **not already on the PR**,
+  add it (via the GitHub MCP). If it is **already present**, do nothing: it is
+  already recorded. Never add it a second time, and never remove it — only a human
+  removes it after reviewing.
+- **needs-human: no** → do **not** add the label. If it is already present, leave
+  it in place; only a human removes it.
 
-The label is the whole verdict, and setting it is **mandatory** when the decision
-is yes. Add it with the GitHub MCP server's label tool (for the `needs-human`
-issue label). Do **not** post a verdict comment, modify code, push commits, or
-open a pull request. Set the label and stop.
+Setting the label once, when the decision is yes and it is not yet present, is
+**mandatory** and is your whole output. The label is sticky: once set it stays
+until a human clears it, and you neither re-apply nor remove it. Do **not** post a
+verdict comment, modify code, push commits, or open a pull request. Record the
+label and stop.
 
 If, and only if, the label tool genuinely fails or is unavailable, post one short
 issue comment stating that you could not set the `needs-human` label and the exact

@@ -8,7 +8,6 @@ description: >-
   needs-human escalation, "reconcile the threads", "is this finding fixed",
   "update the agentic gate", or "run the agentic review" on a pull request. It
   produces judgment only: it posts comments and a verdict, and never edits code.
-model: gpt-5.5
 ---
 
 # Conductor (lfx-v2-newsletter-service agentic gate)
@@ -35,7 +34,8 @@ comment.
 - **needs-human escalation — always.** Apply the `/copilot-escalation` skill and
   its `/escalation-guidelines`, decide whether a human must sign off, and record
   it by **setting the `needs-human` label** (the skill's mandatory output, via the
-  GitHub MCP). This runs on every gate/escalation request.
+  GitHub MCP; the label is set once and is sticky, so if it is already present do
+  not re-apply it). This runs on every gate/escalation request.
 - **thread reconciliation — only when there is something new.** Apply the
   `/agentic-reconcile` skill **only** when a commit was pushed after the review
   threads were raised, or a developer has replied arguing a thread does not hold.
