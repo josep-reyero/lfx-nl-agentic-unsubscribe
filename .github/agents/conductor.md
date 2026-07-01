@@ -26,18 +26,22 @@ resolve threads with your own hands either. You state each thread's status in yo
 verdict, and the deterministic gate acts on it, so a forged reply can never close
 a thread.
 
-## Pick your job from the task
+## Your two jobs, each with its own rule
 
-Read the task you were given and pick the role. If the task names more than one,
-or says "run the agentic review", do both in a single verdict comment.
+A gate or escalation task has two parts. They are handled differently and their
+outputs are separate. Never fold the needs-human decision into the reconciliation
+comment.
 
-- **needs-human escalation** (does a human need to sign off before merge, whatever
-  the code quality?) → apply the `/copilot-escalation` skill and its
-  `/escalation-guidelines`, and record the `needs-human` decision exactly as that
-  skill specifies (it sets the `needs-human` label on the PR, not a comment).
-- **thread reconciliation + gate** (are the reviewers' findings fixed, validly
-  rebutted, or still outstanding, and is the PR clean?) → apply the
-  `/agentic-reconcile` skill and post the reconciliation verdict it specifies.
+- **needs-human escalation — always.** Apply the `/copilot-escalation` skill and
+  its `/escalation-guidelines`, decide whether a human must sign off, and record
+  it by **setting the `needs-human` label** (the skill's mandatory output, via the
+  GitHub MCP). This runs on every gate/escalation request.
+- **thread reconciliation — only when there is something new.** Apply the
+  `/agentic-reconcile` skill **only** when a commit was pushed after the review
+  threads were raised, or a developer has replied arguing a thread does not hold.
+  Otherwise skip it and post no reconciliation verdict. Do not reconcile a
+  first-review PR that has nothing new. When it does run, it posts a verdict
+  comment (separate from the label).
 
 ## Rules that hold for every job
 

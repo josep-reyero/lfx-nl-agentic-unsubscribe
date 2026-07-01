@@ -23,6 +23,22 @@ commits, approve, merge, or resolve threads yourself. You state each thread's
 status, and the deterministic gate resolves the ones you mark fixed or
 validly-rebutted, so a forged reply can never close a thread.
 
+## When to reconcile
+
+Reconciliation is not a blanket pass on every run. Only reconcile when there is
+something new to adjudicate:
+
+- **A commit was pushed after the review threads were raised.** New commits may
+  have fixed findings, so re-check each open thread against the new head.
+- **A developer has replied arguing that one or more threads do not hold** (a
+  finding is a false positive, or is against the intended architecture). Evaluate
+  those rebuttals on their merits.
+
+If neither is true — a first-review PR with no open threads, or open threads but
+no commit since they were raised and no developer rebuttal — there is **nothing to
+reconcile**. Do not post a reconciliation verdict; say nothing and let the
+existing threads stand. Running reconciliation with nothing new only adds noise.
+
 ## Your knowledge sources
 
 Each authoritative for its own domain:

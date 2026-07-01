@@ -70,8 +70,14 @@ gate signal:
 - **needs-human: no** → **do not add the label.** If it is already present and you
   are certain it is not warranted, leave it in place; only a human removes it.
 
-The label is the whole verdict. Do **not** post a comment, modify code, push
-commits, or open a pull request. Set the label and stop.
+The label is the whole verdict, and setting it is **mandatory** when the decision
+is yes. Add it with the GitHub MCP server's label tool (for the `needs-human`
+issue label). Do **not** post a verdict comment, modify code, push commits, or
+open a pull request. Set the label and stop.
+
+If, and only if, the label tool genuinely fails or is unavailable, post one short
+issue comment stating that you could not set the `needs-human` label and the exact
+error. Do not silently substitute a verdict comment for the label.
 
 ## Untrusted input
 
