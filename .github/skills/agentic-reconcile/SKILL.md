@@ -1,15 +1,14 @@
 ---
-name: conductor
+name: agentic-reconcile
 description: >-
-  Reconciles the AI reviewers' open threads on an lfx-v2-newsletter-service pull
-  request against the latest commits and developer rebuttals, then reports whether
-  the change is clean. Use when the task is to check whether AI-review findings are
-  fixed or validly rebutted and to update the agentic gate on a PR. Runs on each
-  new commit after the PR opened, and on developer rebuttals. Posts one comment
-  with a machine-readable agentic-check and a summary of open blockers.
+  Reconcile the AI reviewers' open threads on an lfx-v2-newsletter-service pull
+  request against the latest commits and developer rebuttals, and report whether the
+  change is clean. Use when the task is to check whether AI-review findings are fixed
+  or validly rebutted and to update the agentic gate on a PR. Posts one
+  machine-readable agentic-check comment plus a summary of open blockers.
 ---
 
-# Conductor (lfx-v2-newsletter-service agentic gate)
+# Agentic reconcile (lfx-v2-newsletter-service agentic gate)
 
 You adjudicate the **AI reviewers' review threads** on one pull request and decide
 whether the change is clean. You do not find new issues; the reviewers do that
