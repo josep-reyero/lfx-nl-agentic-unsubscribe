@@ -1,20 +1,18 @@
 # Copyright The Linux Foundation and each contributor to LFX.
 # SPDX-License-Identifier: MIT
 #
-# On PR open: request the native Copilot code review, then run the needs-human
-# escalation as an Agent Tasks API task pinned to gpt-5.5. The task talks to the
-# repo's writable GitHub MCP (github-comment / add_issue_comment), so the escalation
-# agent posts its own verdict comment. This workflow then polls the task to
-# completion, reads that verdict, and sets the sticky needs-human label itself.
+# On PR open: request the native Copilot code review, then fire the needs-human
+# escalation as an Agent Tasks API task pinned to gpt-5.5. This one task does two
+# jobs at once: it is the FIRST session on the PR, so it seeds the gpt-5.5 session
+# that later @copilot conductor runs continue, and it runs the escalation and posts
+# its needs-human verdict comment via the writable GitHub MCP (add_issue_comment).
 #
-# The label write lives here (a workflow triggered by the human's PR-open event),
-# NOT in a workflow triggered by the agent's comment: GitHub gates any run whose
-# triggering actor is Copilot as action_required, so agent-triggered writes never
-# run unattended. Polling is how this un-gated workflow observes the agent's output.
+# We do NOT poll or wait here. The repo has "require approval for Copilot workflow
+# runs" turned OFF, so the agent's own comment triggers agentic-apply.yml, which
+# reads the verdict and sets the sticky needs-human label. Fire and forget.
 #
-# Runs as REVIEWER_PAT_GENERAL (write + Copilot seat + Commit statuses/PR write for
-# the deterministic writes). This is a different, more powerful token than the
-# agent's MCP token, which can only read and comment.
+# Runs as REVIEWER_PAT_GENERAL (write + a Copilot seat, to request the reviewer and
+# start the task).
 ---
 name: Agentic Escalation (open)
 
@@ -48,43 +46,12 @@ jobs:
             -f "reviewers[]=copilot-pull-request-reviewer[bot]" || \
             echo "::warning::could not request the Copilot reviewer (already requested, or review not enabled)"
 
-      - name: Escalation task (gpt-5.5) -> poll -> set sticky needs-human label
+      - name: Fire escalation task (gpt-5.5) — seeds the session and posts the verdict
         run: |
-          set -u
           TID=$(gh api "/agents/repos/$REPO/tasks" \
             -H "X-GitHub-Api-Version: 2026-03-10" --method POST \
             -f model=gpt-5.5 -F create_pull_request=false \
             -f base_ref="$BASE_REF" -f head_ref="$HEAD_REF" \
             -f prompt="Run the needs-human escalation for pull request #$PR in $REPO, following the repository instructions exactly. Post your machine-readable needs-human verdict comment using the add_issue_comment tool." \
             --jq '.id')
-          echo "escalation task: $TID"
-
-          for i in $(seq 1 60); do   # up to ~15 min
-            ST=$(gh api "/agents/tasks/$TID" -H "X-GitHub-Api-Version: 2026-03-10" --jq '.state' 2>/dev/null || echo "?")
-            echo "task state: $ST"
-            case "$ST" in
-              completed) break ;;
-              failed|cancelled|error) echo "::warning::escalation task ended as $ST"; break ;;
-            esac
-            sleep 15
-          done
-
-          BODY=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
-            --jq '[.[] | select(.user.login=="copilot-swe-agent" and (.body|test("needs-human:";"i")))] | last | .body // ""')
-          if [ -z "$BODY" ]; then
-            echo "::warning::no needs-human verdict comment found; not labelling"
-            exit 0
-          fi
-          echo "verdict: $(printf '%s' "$BODY" | grep -iE 'needs-human:' | head -1)"
-
-          if printf '%s' "$BODY" | grep -qiE 'needs-human:[[:space:]]*yes'; then
-            present=$(gh api "repos/$REPO/issues/$PR/labels" --jq '[.[].name] | index("needs-human")')
-            if [ "$present" = "null" ] || [ -z "$present" ]; then
-              gh api --method POST "repos/$REPO/issues/$PR/labels" -f "labels[]=needs-human"
-              echo "needs-human label set"
-            else
-              echo "needs-human already present (sticky) — no-op"
-            fi
-          else
-            echo "needs-human: no — no label"
-          fi
+          echo "escalation task: $TID (seeds the gpt-5.5 session; agentic-apply reacts to its comment)"

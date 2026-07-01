@@ -1,29 +1,28 @@
 # Copyright The Linux Foundation and each contributor to LFX.
 # SPDX-License-Identifier: MIT
 #
-# Runs the conductor as an Agent Tasks API task (gpt-5.5) that reconciles the
-# AI-reviewer threads and posts a machine-readable agentic-check comment via the
-# writable GitHub MCP. This workflow then polls the task, reads that comment, and
-# does the deterministic writes: resolve the threads it marks fixed/rebutted-valid
-# and set the agentic-review/clean commit status on the head.
+# Mentions @copilot to run the pr-conductor: reconcile the AI-reviewer threads and
+# post a machine-readable agentic-check comment. The @copilot mention continues the
+# gpt-5.5 session the escalation task seeded on this PR, so the conductor runs on
+# gpt-5.5, and the repo copilot-instructions route the task to the /pr-conductor
+# skill. agentic-apply.yml then reacts to the posted comment (no polling here).
 #
 # Triggers:
-#   opened/reopened -> the BASELINE agentic-check after the first review round
-#     (wait for the native review to post its threads first, so the conductor has
-#     something to judge). This is what establishes the initial clean/blocked state.
-#   synchronize     -> re-verify after a new commit (are the findings fixed?).
-#   review comment (human only) -> a developer rebuttal to re-adjudicate.
+#   pull_request_review submitted by a bot reviewer -> the review round finished:
+#     run the conductor (the BASELINE on the first review, a re-check on later ones).
+#   synchronize -> a new commit was pushed: re-check whether findings are now fixed.
+#   review comment from a human -> a developer rebuttal to re-adjudicate.
+# It does NOT run on open (nothing to reconcile until the reviewers have posted).
 #
-# All triggers are the human's own PR events, so the run is NOT gated (unlike a run
-# triggered by the agent's own comment). Polling lets this un-gated workflow read
-# the agent's verdict. Deterministic writes use REVIEWER_PAT_GENERAL (needs Issues,
-# Pull requests, and Commit statuses write); the agent's MCP token cannot do them.
+# Runs as REVIEWER_PAT_GENERAL (write + a Copilot seat, to drive @copilot).
 ---
 name: Agentic Conductor (reconcile)
 
 "on":
   pull_request:
-    types: [opened, reopened, synchronize]
+    types: [synchronize]
+  pull_request_review:
+    types: [submitted]
   pull_request_review_comment:
     types: [created]
 
@@ -35,87 +34,24 @@ concurrency:
 
 jobs:
   reconcile:
-    # PR events always; review replies only from a human (the reviewer bots and the
-    # conductor's own replies are type Bot).
+    # synchronize always; a submitted review only from a bot reviewer (the native
+    # Copilot review / pi finishing); a review reply only from a human (a rebuttal).
     if: >-
-      github.event_name == 'pull_request' ||
-      github.event.comment.user.type == 'User'
+      (github.event_name == 'pull_request') ||
+      (github.event_name == 'pull_request_review' && github.event.review.user.type == 'Bot') ||
+      (github.event_name == 'pull_request_review_comment' && github.event.comment.user.type == 'User')
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.REVIEWER_PAT_GENERAL }}
       REPO: ${{ github.repository }}
       PR: ${{ github.event.pull_request.number }}
-      HEAD_REF: ${{ github.event.pull_request.head.ref }}
-      BASE_REF: ${{ github.event.pull_request.base.ref }}
-      ACTION: ${{ github.event.action }}
     steps:
       - name: Guard PAT
         run: |
           [ -n "$GH_TOKEN" ] || { echo "::error::REVIEWER_PAT_GENERAL not set"; exit 1; }
 
-      - name: On open, wait for the native review to post its threads
-        if: github.event.action == 'opened' || github.event.action == 'reopened'
+      - name: Mention @copilot to run the pr-conductor
         run: |
-          for i in $(seq 1 40); do   # up to ~10 min
-            reviews=$(gh api "repos/$REPO/pulls/$PR/reviews" \
-              --jq '[.[] | select(.user.login|test("copilot-pull-request-reviewer|^Copilot$";"i"))] | length' 2>/dev/null || echo 0)
-            rc=$(gh api "repos/$REPO/pulls/$PR/comments" \
-              --jq '[.[] | select(.user.login|test("copilot";"i"))] | length' 2>/dev/null || echo 0)
-            echo "native reviews=$reviews review-comments=$rc"
-            if [ "${reviews:-0}" -gt 0 ] || [ "${rc:-0}" -gt 0 ]; then echo "review present"; break; fi
-            sleep 15
-          done
-
-      - name: Conductor task (gpt-5.5) -> poll -> resolve threads + set status
-        run: |
-          set -u
-          TID=$(gh api "/agents/repos/$REPO/tasks" \
-            -H "X-GitHub-Api-Version: 2026-03-10" --method POST \
-            -f model=gpt-5.5 -F create_pull_request=false \
-            -f base_ref="$BASE_REF" -f head_ref="$HEAD_REF" \
-            -f prompt="Reconcile the AI-reviewer threads on pull request #$PR in $REPO against the latest commits and any developer replies, following the repository instructions exactly. Post your machine-readable agentic-check comment using the add_issue_comment tool." \
-            --jq '.id')
-          echo "conductor task: $TID"
-
-          for i in $(seq 1 60); do   # up to ~15 min
-            ST=$(gh api "/agents/tasks/$TID" -H "X-GitHub-Api-Version: 2026-03-10" --jq '.state' 2>/dev/null || echo "?")
-            echo "task state: $ST"
-            case "$ST" in
-              completed) break ;;
-              failed|cancelled|error) echo "::warning::conductor task ended as $ST"; break ;;
-            esac
-            sleep 15
-          done
-
-          BODY=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
-            --jq '[.[] | select(.user.login=="copilot-swe-agent" and (.body|contains("<!-- agentic:check v1 -->")))] | last | .body // ""')
-          if [ -z "$BODY" ]; then
-            echo "::warning::no agentic-check comment found; leaving status unset"
-            exit 0
-          fi
-
-          HEAD_SHA=$(gh api "repos/$REPO/pulls/$PR" --jq '.head.sha')
-          CLEAN=$(printf '%s' "$BODY" | grep -iE 'clean:[[:space:]]*(true|false)' | head -1 | grep -oiE 'true|false' | tr 'A-Z' 'a-z')
-          echo "head=$HEAD_SHA clean=$CLEAN"
-
-          # Resolve threads the conductor marked fixed or rebutted-valid.
-          printf '%s\n' "$BODY" | grep -E '^[[:space:]]*-[[:space:]]*id:' | while IFS= read -r line; do
-            tid=$(printf '%s' "$line" | sed -nE 's/.*id:[[:space:]]*([^[:space:]]+).*/\1/p')
-            st=$(printf '%s' "$line" | sed -nE 's/.*status:[[:space:]]*([^[:space:]]+).*/\1/p')
-            case "$st" in
-              fixed|rebutted-valid)
-                if gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id="$tid" >/dev/null 2>&1; then
-                  echo "resolved $tid ($st)"
-                else
-                  echo "::warning::could not resolve thread $tid"
-                fi ;;
-              *) : ;;
-            esac
-          done
-
-          STATE=failure
-          [ "$CLEAN" = "true" ] && STATE=success
-          gh api --method POST "repos/$REPO/statuses/$HEAD_SHA" \
-            -f state="$STATE" -f context=agentic-review/clean \
-            -f description="conductor: clean=$CLEAN"
-          echo "agentic-review/clean = $STATE"
+          gh api "repos/$REPO/issues/$PR/comments" \
+            -f body="@copilot Reconcile the AI-reviewer threads on this pull request against the latest commits and any developer replies, following the repository instructions." \
+            --jq '.html_url'

@@ -21,10 +21,11 @@ comment; it references the `/escalation-guidelines` skill.
 ## 3. Thread reconciliation / agentic-check
 
 When the task is to check whether the **AI reviewers' findings** are fixed or
-validly rebutted and to update the agentic gate, use the **`/agentic-reconcile`**
-skill and follow it. It reconciles the AI-reviewer threads (never human threads),
-references `/newsletter-code-review` and `/newsletter-security-review`, and posts one
-comment with a machine-readable agentic-check block plus a summary of open blockers.
+validly rebutted and to update the agentic gate, use the **`/pr-conductor`** skill
+and follow it. It reconciles the AI-reviewer threads (never human threads), works
+with the engineer on findings that go against the architecture, references
+`/newsletter-code-review` and `/newsletter-security-review`, and posts one comment
+with a machine-readable agentic-check block plus a summary of open blockers.
 
 ## You act through the GitHub MCP server
 
