@@ -45,6 +45,17 @@ jobs:
         run: |
           [ -n "$GH_TOKEN" ] || { echo "::error::REVIEWER_PAT_GENERAL not set"; exit 1; }
 
+      - name: Mark the head not-yet-clean (block the gate until the conductor judges)
+        run: |
+          # Every new head starts blocked, from the first seconds of this run, so there
+          # is never a window where the PR looks mergeable before the baseline lands.
+          # apply.yml overwrites this with the real failure/success once the conductor
+          # posts its agentic-check. pending (not failure) because it is not yet judged.
+          gh api --method POST "repos/$REPO/statuses/$HEAD_SHA" \
+            -f state=pending -f context=agentic-review/clean \
+            -f description="conductor: awaiting first review" >/dev/null
+          echo "agentic-review/clean = pending (awaiting conductor)"
+
       - name: Request the native review for the current head
         run: |
           # On a new commit the diff changed, so this triggers a fresh pass; on open it
