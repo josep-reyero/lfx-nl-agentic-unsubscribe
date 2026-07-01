@@ -1,0 +1,53 @@
+# Copyright The Linux Foundation and each contributor to LFX.
+# SPDX-License-Identifier: MIT
+#
+# On PR open: request the native Copilot code review (so review threads appear for
+# the conductor to reconcile) and launch the needs-human escalation as an Agent
+# Tasks API task pinned to gpt-5.5. The API task is the FIRST session on the PR, so
+# it seeds the gpt-5.5 session lineage that later @copilot conductor runs continue.
+# Both calls are authored by a user with write access + a Copilot seat (REVIEWER_PAT),
+# because the default GITHUB_TOKEN cannot request the Copilot reviewer or start a task.
+---
+name: Agentic Escalation (open)
+
+"on":
+  pull_request:
+    types: [opened, reopened]
+
+permissions: {}
+
+concurrency:
+  group: agentic-escalation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  escalate:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.REVIEWER_PAT_GENERAL }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_REF: ${{ github.event.pull_request.head.ref }}
+    steps:
+      - name: Guard PAT
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::REVIEWER_PAT_GENERAL is not set (needs a user PAT with write + Copilot seat)." >&2
+            exit 1
+          fi
+      - name: Request native Copilot code review
+        run: |
+          gh api --method POST "repos/$REPO/pulls/$PR/requested_reviewers" \
+            -f "reviewers[]=copilot-pull-request-reviewer[bot]" || \
+            echo "::warning::could not request the Copilot reviewer (already requested, or review not enabled)"
+      - name: Launch needs-human escalation (Agent Tasks API, gpt-5.5)
+        run: |
+          gh api "/agents/repos/$REPO/tasks" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            --method POST \
+            -f model=gpt-5.5 \
+            -F create_pull_request=false \
+            -f base_ref=main \
+            -f head_ref="$HEAD_REF" \
+            -f prompt="Run the needs-human escalation for pull request #$PR in $REPO, following the repository instructions exactly. Post your machine-readable needs-human verdict comment on the pull request via the GitHub MCP server." \
+            --jq '"escalation task: \(.id) [\(.state)]"'

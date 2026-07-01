@@ -1,49 +1,46 @@
 # Copyright The Linux Foundation and each contributor to LFX.
 # SPDX-License-Identifier: MIT
 #
-# Trigger workflow for the Copilot conductor. It posts a single, generic
-# @copilot comment on the PR; the repository copilot-instructions route that to
-# the `conductor` agent, which runs the needs-human escalation and sets the
-# needs-human label. The comment must be authored by a user with write access and
-# a Copilot seat, so it uses a PAT secret (CONDUCTOR_TRIGGER_PAT). A default
-# GITHUB_TOKEN / github-actions[bot] comment is ignored by Copilot, so it cannot
-# be used here. The PAT is stored in the REVIEWER_PAT secret.
+# Triggers the conductor to reconcile the AI-reviewer threads. It fires on a new
+# commit (synchronize) and on a developer's review reply (a possible rebuttal), but
+# NOT on open — at open there are no fixes to verify yet (escalation runs then).
+# It posts a generic @copilot comment as a user with write + a Copilot seat
+# (REVIEWER_PAT); that comment continues the gpt-5.5 session the escalation task
+# seeded, so the conductor runs on gpt-5.5 with the escalation's context, and the
+# repo copilot-instructions route the task to the conductor agent.
 ---
-name: Agentic Conductor (trigger)
+name: Agentic Conductor (reconcile)
 
-# Auto pull_request trigger disabled during the API-first session test, so the
-# API task is genuinely the first session on the PR. Manual dispatch only.
 "on":
-  workflow_dispatch:
-    inputs:
-      pr:
-        description: "PR number to run the conductor on"
-        required: true
+  pull_request:
+    types: [synchronize]
+  pull_request_review_comment:
+    types: [created]
 
 permissions: {}
 
 concurrency:
-  group: conductor-trigger-${{ github.event.pull_request.number || github.event.inputs.pr }}
+  group: agentic-conductor-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  trigger-conductor:
+  reconcile:
+    # synchronize always; review replies only from a human (skip the reviewer bots
+    # and the conductor's own replies, which are type Bot).
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event.comment.user.type == 'User'
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.REVIEWER_PAT_GENERAL }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
     steps:
-      - name: Post @copilot conductor directive
-        env:
-          GH_TOKEN: ${{ secrets.REVIEWER_PAT_GENERAL }}
-          REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number || github.event.inputs.pr }}
+      - name: Guard PAT
         run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::error::REVIEWER_PAT is not set. Copilot ignores comments from the default GITHUB_TOKEN, so a user PAT with write access and a Copilot seat is required." >&2
-            exit 1
-          fi
-          # Diagnostics (never prints the token): who is this token, and can it see the repo?
-          echo "authed as: $(gh api user --jq '.login' 2>&1 | tail -1)"
-          echo "repo visible: $(gh api "repos/$REPO" --jq '.full_name' 2>&1 | tail -1)"
-          # Use the REST API (not `gh pr comment`, which resolves the repo via
-          # GraphQL and frequently fails for fine-grained PATs).
+          [ -n "$GH_TOKEN" ] || { echo "::error::REVIEWER_PAT_GENERAL not set"; exit 1; }
+      - name: Post @copilot conductor directive
+        run: |
           gh api "repos/$REPO/issues/$PR/comments" \
-            -f body="@copilot Run the needs-human escalation for this pull request, following the repository instructions, and apply the needs-human gate."
+            -f body="@copilot Reconcile the AI-reviewer threads on this pull request against the latest commits and any developer rebuttals, following the repository instructions." \
+            --jq '.html_url'
