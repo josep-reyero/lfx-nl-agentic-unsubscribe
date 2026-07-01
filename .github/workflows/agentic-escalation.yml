@@ -1,12 +1,19 @@
 # Copyright The Linux Foundation and each contributor to LFX.
 # SPDX-License-Identifier: MIT
 #
-# On PR open: request the native Copilot code review (so review threads appear for
-# the conductor to reconcile) and launch the needs-human escalation as an Agent
-# Tasks API task pinned to gpt-5.5. The API task is the FIRST session on the PR, so
-# it seeds the gpt-5.5 session lineage that later @copilot conductor runs continue.
-# Both calls are authored by a user with write access + a Copilot seat (REVIEWER_PAT),
-# because the default GITHUB_TOKEN cannot request the Copilot reviewer or start a task.
+# On PR open, three things:
+#   1. Request the native Copilot code review (so review threads appear for the
+#      conductor to reconcile later).
+#   2. Initialise a gpt-5.5 session on the PR via an Agent Tasks API task. The task
+#      does NO work: it only tells Copilot it will be working on this PR, which
+#      creates the first session pinned to gpt-5.5. The API session's GitHub MCP is
+#      read-only, so it cannot post; its sole purpose is to seed the model.
+#   3. Once that session exists, post an @copilot comment that CONTINUES it (so it
+#      runs on gpt-5.5) and runs the needs-human escalation. The @copilot path gets
+#      a write-capable MCP, so the escalation agent can post its verdict comment.
+# Later @copilot conductor runs on the same PR continue this gpt-5.5 session too.
+# All calls are authored by a user with write + a Copilot seat (REVIEWER_PAT);
+# GITHUB_TOKEN cannot request the reviewer, start a task, or drive @copilot.
 ---
 name: Agentic Escalation (open)
 
@@ -31,23 +38,47 @@ jobs:
     steps:
       - name: Guard PAT
         run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::error::REVIEWER_PAT_GENERAL is not set (needs a user PAT with write + Copilot seat)." >&2
-            exit 1
-          fi
+          [ -n "$GH_TOKEN" ] || { echo "::error::REVIEWER_PAT_GENERAL not set (needs a user PAT with write + Copilot seat)."; exit 1; }
+
       - name: Request native Copilot code review
         run: |
           gh api --method POST "repos/$REPO/pulls/$PR/requested_reviewers" \
             -f "reviewers[]=copilot-pull-request-reviewer[bot]" || \
             echo "::warning::could not request the Copilot reviewer (already requested, or review not enabled)"
-      - name: Launch needs-human escalation (Agent Tasks API, gpt-5.5)
+
+      - name: Initialise gpt-5.5 session (Agent Tasks API seed)
+        id: seed
         run: |
-          gh api "/agents/repos/$REPO/tasks" \
+          TID=$(gh api "/agents/repos/$REPO/tasks" \
             -H "X-GitHub-Api-Version: 2026-03-10" \
             --method POST \
             -f model=gpt-5.5 \
             -F create_pull_request=false \
             -f base_ref=main \
             -f head_ref="$HEAD_REF" \
-            -f prompt="Run the needs-human escalation for pull request #$PR in $REPO, following the repository instructions exactly. Post your machine-readable needs-human verdict comment on the pull request via the GitHub MCP server." \
-            --jq '"escalation task: \(.id) [\(.state)]"'
+            -f prompt="You will be working on pull request #$PR in $REPO as its agentic reviewer. Acknowledge that you are set up to work on this pull request. Do not review, comment, label, or change anything yet: this message only initialises your session. You will receive follow-up instructions on the pull request." \
+            --jq '.id')
+          echo "seed task: $TID"
+          echo "tid=$TID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the session to establish
+        env:
+          TID: ${{ steps.seed.outputs.tid }}
+        run: |
+          [ -n "$TID" ] || { echo "::warning::no seed task id; skipping wait"; exit 0; }
+          for i in $(seq 1 48); do   # up to ~12 min
+            STATE=$(gh api "/agents/tasks/$TID" -H "X-GitHub-Api-Version: 2026-03-10" --jq '.state' 2>/dev/null || echo "?")
+            echo "seed state: $STATE"
+            case "$STATE" in
+              completed) echo "session established"; exit 0 ;;
+              failed|cancelled|error) echo "::warning::seed ended as $STATE; continuing"; exit 0 ;;
+            esac
+            sleep 15
+          done
+          echo "::warning::seed did not complete within the wait; the @copilot session may not inherit gpt-5.5"
+
+      - name: Post @copilot escalation directive
+        run: |
+          gh api "repos/$REPO/issues/$PR/comments" \
+            -f body="@copilot Run the needs-human escalation for this pull request, following the repository instructions, and post your machine-readable needs-human verdict comment." \
+            --jq '.html_url'
