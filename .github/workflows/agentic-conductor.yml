@@ -7,7 +7,7 @@
 # needs-human label. The comment must be authored by a user with write access and
 # a Copilot seat, so it uses a PAT secret (CONDUCTOR_TRIGGER_PAT). A default
 # GITHUB_TOKEN / github-actions[bot] comment is ignored by Copilot, so it cannot
-# be used here.
+# be used here. The PAT is stored in the REVIEWER_PAT secret.
 ---
 name: Agentic Conductor (trigger)
 
@@ -32,12 +32,12 @@ jobs:
     steps:
       - name: Post @copilot conductor directive
         env:
-          GH_TOKEN: ${{ secrets.CONDUCTOR_TRIGGER_PAT }}
+          GH_TOKEN: ${{ secrets.REVIEWER_PAT }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number || github.event.inputs.pr }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "::error::CONDUCTOR_TRIGGER_PAT is not set. Copilot ignores comments from the default GITHUB_TOKEN, so a user PAT with write access and a Copilot seat is required." >&2
+            echo "::error::REVIEWER_PAT is not set. Copilot ignores comments from the default GITHUB_TOKEN, so a user PAT with write access and a Copilot seat is required." >&2
             exit 1
           fi
           gh pr comment "$PR" --repo "$REPO" \
