@@ -23,8 +23,6 @@ name: Agentic Conductor (reconcile)
     types: [synchronize]
   pull_request_review:
     types: [submitted]
-  pull_request_review_comment:
-    types: [created]
 
 permissions: {}
 
@@ -34,12 +32,15 @@ concurrency:
 
 jobs:
   reconcile:
-    # synchronize always; a submitted review only from a bot reviewer (the native
-    # Copilot review / pi finishing); a review reply only from a human (a rebuttal).
+    # A new commit (synchronize) always; a submitted review only from a bot reviewer
+    # (the native Copilot review / pi finishing). We do NOT trigger on individual
+    # review comments: the code-review bot's inline comments would each spawn a run
+    # gated as action_required (the coding-agent approval toggle does not cover the
+    # review bot). Developer rebuttals are read by the conductor whenever it next
+    # runs, so nothing is lost.
     if: >-
       (github.event_name == 'pull_request') ||
-      (github.event_name == 'pull_request_review' && github.event.review.user.type == 'Bot') ||
-      (github.event_name == 'pull_request_review_comment' && github.event.comment.user.type == 'User')
+      (github.event_name == 'pull_request_review' && github.event.review.user.type == 'Bot')
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.REVIEWER_PAT_GENERAL }}
