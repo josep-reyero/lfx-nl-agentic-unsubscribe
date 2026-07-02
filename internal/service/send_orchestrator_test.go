@@ -135,17 +135,17 @@ func (r *fakeNewsletterRepo) Analytics(_ context.Context, _ uuid.UUID) (*model.A
 	return &model.Analytics{}, nil
 }
 
-func (r *fakeNewsletterRepo) CreateUnsubscribe(_ context.Context, projectUID, email string) error {
+func (r *fakeNewsletterRepo) CreateUnsubscribe(_ context.Context, projectUID, emailHash string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.unsubs[projectUID] == nil {
 		r.unsubs[projectUID] = make(map[string]struct{})
 	}
-	r.unsubs[projectUID][strings.ToLower(email)] = struct{}{}
-	r.created = append(r.created, model.NewsletterUnsubscribe{ProjectUID: projectUID, Email: strings.ToLower(email)})
+	r.unsubs[projectUID][emailHash] = struct{}{}
+	r.created = append(r.created, model.NewsletterUnsubscribe{ProjectUID: projectUID, EmailHash: emailHash})
 	return nil
 }
-func (r *fakeNewsletterRepo) ListUnsubscribedEmails(_ context.Context, projectUID string) (map[string]struct{}, error) {
+func (r *fakeNewsletterRepo) ListUnsubscribedHashes(_ context.Context, projectUID string) (map[string]struct{}, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	out := make(map[string]struct{})
@@ -173,7 +173,7 @@ func newTestOrchestrator(repo *fakeNewsletterRepo, committee *fakeCommitteeClien
 
 func TestResolveRecipientsExcludesUnsubscribed(t *testing.T) {
 	repo := newFakeRepo()
-	repo.unsubs["p1"] = map[string]struct{}{"alice@example.com": {}}
+	repo.unsubs["p1"] = map[string]struct{}{HashRecipient("alice@example.com"): {}}
 	committee := &fakeCommitteeClient{members: map[string][]model.CommitteeMember{
 		"c1": {
 			{Email: "Alice@Example.com", FirstName: "Alice"},
@@ -231,15 +231,15 @@ func TestFanOutInjectsPerRecipientUnsubscribeURL(t *testing.T) {
 		if !strings.Contains(s.HTML, "https://api.example/newsletters/unsubscribe?t=") {
 			t.Errorf("HTML for %s missing unsubscribe link: %s", s.To, s.HTML)
 		}
-		// Token must decode to this recipient's email.
+		// Token must carry this recipient's opaque hash, never the address.
 		_, after, _ := strings.Cut(s.HTML, "/newsletters/unsubscribe?t=")
 		token, _, _ := strings.Cut(after, `"`)
-		_, gotEmail, vErr := unsub.VerifyToken(token)
+		_, gotHash, vErr := unsub.VerifyToken(token)
 		if vErr != nil {
 			t.Errorf("verify token for %s: %v", s.To, vErr)
 		}
-		if gotEmail != s.To {
-			t.Errorf("token for %s decoded to %s", s.To, gotEmail)
+		if want := HashRecipient(s.To); gotHash != want {
+			t.Errorf("token for %s decoded to hash %s, want %s", s.To, gotHash, want)
 		}
 	}
 }
@@ -283,16 +283,16 @@ func TestSendUnsubscribeResendExcludes(t *testing.T) {
 	}
 	token, _, _ := strings.Cut(after, `"`)
 
-	// --- 3. Alice "clicks" the link.
-	gotProject, gotEmail, err := unsub.Unsubscribe(ctx, token)
+	// --- 3. Alice "clicks" the link (and confirms the POST).
+	gotProject, err := unsub.Unsubscribe(ctx, token)
 	if err != nil {
 		t.Fatalf("unsubscribe: %v", err)
 	}
-	if gotProject != "p1" || gotEmail != "alice@example.com" {
-		t.Fatalf("unsubscribe decoded to (%s, %s), want (p1, alice@example.com)", gotProject, gotEmail)
+	if gotProject != "p1" {
+		t.Fatalf("unsubscribe decoded to project %s, want p1", gotProject)
 	}
-	if _, ok := repo.unsubs["p1"]["alice@example.com"]; !ok {
-		t.Fatalf("alice not recorded in unsubscribe store")
+	if _, ok := repo.unsubs["p1"][HashRecipient("alice@example.com")]; !ok {
+		t.Fatalf("alice's hash not recorded in unsubscribe store")
 	}
 
 	// --- 4. Recipient count for p1 now reflects the exclusion.

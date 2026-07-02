@@ -314,7 +314,7 @@ func (o *SendOrchestrator) resolveRecipients(ctx context.Context, projectUID str
 				continue
 			}
 			seen[email] = struct{}{}
-			if _, unsub := excluded[email]; unsub {
+			if _, unsub := excluded[HashRecipient(email)]; unsub {
 				skipped++
 				continue
 			}
@@ -334,13 +334,14 @@ func (o *SendOrchestrator) resolveRecipients(ctx context.Context, projectUID str
 	return out, nil
 }
 
-// listUnsubscribed returns the set of unsubscribed emails for the project, or
-// an empty set when no unsubscribe service is wired (tests, legacy config).
+// listUnsubscribed returns the set of opted-out recipient hashes for the
+// project, or an empty set when no unsubscribe service is wired (tests,
+// legacy config).
 func (o *SendOrchestrator) listUnsubscribed(ctx context.Context, projectUID string) (map[string]struct{}, error) {
 	if o.unsub == nil || o.unsub.repo == nil {
 		return map[string]struct{}{}, nil
 	}
-	return o.unsub.repo.ListUnsubscribedEmails(ctx, projectUID)
+	return o.unsub.repo.ListUnsubscribedHashes(ctx, projectUID)
 }
 
 // fanOut dispatches per-recipient send_email requests to email-service with
