@@ -6,10 +6,12 @@
 # and the needs-human label is absent, records an "approve" verdict.
 #
 # It triggers on the signals the deterministic apply layer produces with a PAT
-# (agentic-review/clean status, the needs-human label, thread resolves). PAT-
-# generated events DO start workflows, unlike GITHUB_TOKEN ones, so triggering on
-# status / labeled / review_thread fires reliably. It re-derives from the current
-# head, so a PR that advanced past the reviewed SHA fails closed.
+# (the agentic-review/clean status and the needs-human label). PAT-generated events
+# DO start workflows, unlike GITHUB_TOKEN ones, so triggering on status / labeled
+# fires reliably. apply sets the clean status on every run, so the status event
+# already covers thread resolves; there is no separate review_thread trigger. It
+# re-derives from the current head, so a PR that advanced past the reviewed SHA
+# fails closed.
 #
 # Guarded by the AGENTIC_GATE_ENABLED repo variable (shadow mode until 'true').
 #
@@ -25,8 +27,6 @@ name: Agentic Gate
   status: {}
   pull_request:
     types: [labeled, unlabeled]
-  pull_request_review_thread:
-    types: [resolved, unresolved]
 
 concurrency:
   group: gate-${{ github.event.pull_request.number || github.event.sha || github.run_id }}
@@ -39,6 +39,11 @@ permissions:
 
 jobs:
   gate:
+    # A status event fires for every context (CI statuses too); only react to our own
+    # agentic-review/clean status. Label events always pass this guard.
+    if: >-
+      github.event_name != 'status' ||
+      github.event.context == 'agentic-review/clean'
     runs-on: ubuntu-latest
     steps:
       - name: Resolve PR

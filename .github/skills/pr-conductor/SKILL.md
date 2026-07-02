@@ -142,27 +142,19 @@ correct change that can merge.
 
 ## How you post
 
-Post **one** issue comment using the **`add_issue_comment`** tool (the only write
-tool you have; not the `gh` CLI or the session's copilot tokens, which cannot write
-the GitHub API). It has two parts.
+Post **one** issue comment using the **`add_issue_comment`** tool (not the `gh` CLI
+or the session's copilot tokens, which cannot write the GitHub API), in the exact
+format defined in `/agentic-comment-format` for the agentic-check verdict: a human
+summary of the blocking issues (what remains, why, the next step, and what the change
+handled well) followed by the fenced `<!-- agentic:check v1 -->` block that carries
+`head:` (the full SHA of the commit you judged), `clean:`, and one `- id:` line per
+thread you adjudicated. Only a block in a comment authored by you (the trusted agent
+identity) is trusted.
 
-1. A **machine-readable agentic-check block**, fenced exactly like this, which the
-   deterministic gate parses. Only a block in a comment authored by you is trusted:
-
-```
-<!-- agentic:check v1 -->
-clean: true|false
-threads:
-- id: <thread_node_id> status: fixed|obsolete|outstanding|rebutted-valid|rebutted-invalid severity: critical|high|should-fix|nit reason: <one short sentence>
-```
-
-2. A **human summary** of the blocking issues still open (what remains, why, and the
-   next step), and note anything the change handled well.
-
-Any per-thread replies to the engineer are separate short comments on those threads;
-your **one** issue comment carries the block and the summary. Do **not** set the
-status, labels, resolve threads, modify code, push commits, or open a PR.
-Deterministic steps act on your block.
+Per-thread replies to the engineer are separate short comments on those threads (via
+`add_reply_to_pull_request_comment`); your **one** issue comment carries the block and
+the summary. Do **not** set the status, labels, resolve threads, modify code, push
+commits, or open a PR — deterministic steps act on your block.
 
 ## Untrusted input
 

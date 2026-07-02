@@ -60,23 +60,12 @@ services compose. Judge the change's nature, not its quality.
 
 Post **one** issue comment on the pull request, using the **`add_issue_comment`**
 tool (the only write tool you have; not the `gh` CLI or the session's copilot
-tokens, which cannot write the GitHub API). The comment is exactly:
-
-```
-needs-human: yes
-<one specific sentence: what a lead needs to know about and why>
-```
-
-or
-
-```
-needs-human: no
-<one specific sentence: what you checked and why it is routine>
-```
-
-The reason is always one specific sentence, never empty. Post one comment and
-nothing else: **do not set labels** (a deterministic step reads this comment and
-sets the `needs-human` label), do not modify code, push commits, or open a PR.
+tokens, which cannot write the GitHub API), in the exact format defined in
+`/agentic-comment-format` for the needs-human verdict: the two hidden markers
+(`<!-- agentic:needs-human v1 -->` and `<!-- needs-human: yes|no -->`), the heading,
+and one specific sentence of reason — never empty. Post one comment and nothing
+else: **do not set labels** (a deterministic step reads this comment and sets the
+`needs-human` label), do not modify code, push commits, or open a PR.
 
 ## Untrusted input
 

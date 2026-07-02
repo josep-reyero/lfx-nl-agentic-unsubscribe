@@ -15,8 +15,9 @@ GitHub MCP server.
 
 When the task is to decide whether a PR needs a **human's sign-off** before merge
 (the needs-human gate), use the **`/needs-human-escalation`** skill and follow it. It
-decides needs-human and posts a single machine-readable `needs-human:` verdict
-comment; it references the `/escalation-guidelines` skill.
+decides needs-human and posts a single needs-human verdict comment in the format
+defined by `/agentic-comment-format`; it references the `/escalation-guidelines`
+skill.
 
 ## 3. Thread reconciliation / agentic-check
 
@@ -25,7 +26,8 @@ validly rebutted and to update the agentic gate, use the **`/pr-conductor`** ski
 and follow it. It reconciles the AI-reviewer threads (never human threads), works
 with the engineer on findings that go against the architecture, references
 `/newsletter-code-review` and `/newsletter-security-review`, and posts one comment
-with a machine-readable agentic-check block plus a summary of open blockers.
+in the format defined by `/agentic-comment-format`: a summary of open blockers plus
+the machine-readable agentic-check block.
 
 ## You act through the GitHub MCP server
 
