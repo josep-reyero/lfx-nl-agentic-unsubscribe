@@ -278,6 +278,9 @@ func (o *SendOrchestrator) Recipients(ctx context.Context, projectUID string, co
 // goroutines as soon as one returns an error so a transient failure from one
 // committee doesn't keep the remaining lookups running.
 func (o *SendOrchestrator) resolveRecipients(ctx context.Context, projectUID string, committeeUIDs []string) ([]model.CommitteeMember, error) {
+	if err := validateProjectUID(projectUID); err != nil {
+		return nil, err
+	}
 	results := make([][]model.CommitteeMember, len(committeeUIDs))
 
 	g, gctx := errgroup.WithContext(ctx)

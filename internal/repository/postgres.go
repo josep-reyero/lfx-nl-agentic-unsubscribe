@@ -314,7 +314,7 @@ func (r *PostgresNewsletterRepo) Analytics(ctx context.Context, newsletterID uui
 func (r *PostgresNewsletterRepo) CreateUnsubscribe(ctx context.Context, projectUID, emailHash string) error {
 	row := &model.NewsletterUnsubscribe{
 		ProjectUID: projectUID,
-		EmailHash:  strings.TrimSpace(emailHash),
+		EmailHash:  strings.ToLower(strings.TrimSpace(emailHash)),
 	}
 	if _, err := r.db.NewInsert().
 		Model(row).
