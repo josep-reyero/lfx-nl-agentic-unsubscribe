@@ -133,7 +133,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_opens_newsletter_recipient_hour
 CREATE TABLE IF NOT EXISTS newsletter_unsubscribes (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     project_uid TEXT        NOT NULL,
-    email_hash  TEXT        NOT NULL,
+    email_hash  TEXT        NOT NULL CHECK (email_hash ~ '^[a-f0-9]{64}$'),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );

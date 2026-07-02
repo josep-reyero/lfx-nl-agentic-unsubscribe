@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"github.com/linuxfoundation/lfx-v2-newsletter-service/internal/domain"
@@ -28,6 +29,11 @@ const UnsubscribeURLPlaceholder = "%%UNSUBSCRIBE_URL%%"
 // one-click unsubscribe link.
 const unsubscribePath = "/newsletters/unsubscribe"
 
+// emailHashPattern matches the lowercase-hex SHA-256 recipient hash the
+// token carries (the HashRecipient output shape, the same one the
+// open-tracking pixel validates).
+var emailHashPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+
 // UnsubscribeService owns project-scoped opt-out persistence and the
 // HMAC-signed token that secures the public unsubscribe link.
 type UnsubscribeService struct {
@@ -37,9 +43,9 @@ type UnsubscribeService struct {
 }
 
 // NewUnsubscribeService wires an UnsubscribeService. baseURL should be the
-// externally-reachable origin of this service (e.g.
-// "https://api.lfx.linuxfoundation.org/newsletter"); trailing slashes are
-// trimmed.
+// externally-reachable origin the gateway serves this service on (e.g.
+// "https://lfx-api.linuxfoundation.org" — the route path is appended, so no
+// path segment belongs here); trailing slashes are trimmed.
 func NewUnsubscribeService(repo port.UnsubscribeRepository, secret []byte, baseURL string) *UnsubscribeService {
 	return &UnsubscribeService{
 		repo:    repo,
@@ -92,7 +98,7 @@ func (s *UnsubscribeService) VerifyToken(token string) (projectUID, emailHash st
 		return "", "", fmt.Errorf("%w: malformed token", domain.ErrInvalidRequest)
 	}
 	projectUID, emailHash, gotMAC := parts[0], parts[1], parts[2]
-	if projectUID == "" || emailHash == "" {
+	if projectUID == "" || !emailHashPattern.MatchString(emailHash) {
 		return "", "", fmt.Errorf("%w: malformed token", domain.ErrInvalidRequest)
 	}
 	wantMAC := s.sign(projectUID + "\n" + emailHash)
@@ -107,6 +113,9 @@ func (s *UnsubscribeService) VerifyToken(token string) (projectUID, emailHash st
 // name the project in the confirmation; the plaintext address is never
 // available here, so the confirmation stays generic.
 func (s *UnsubscribeService) Unsubscribe(ctx context.Context, token string) (projectUID string, err error) {
+	if s.repo == nil {
+		return "", fmt.Errorf("unsubscribe repository not configured")
+	}
 	projectUID, emailHash, err := s.VerifyToken(token)
 	if err != nil {
 		return "", err

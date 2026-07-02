@@ -63,6 +63,9 @@ func (h *Handler) ConfirmUnsubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Unauthenticated POST surface: cap the form body like every other
+	// body-reading handler in this package.
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	token := r.PostFormValue("t")
 	projectUID, err := h.unsub.Unsubscribe(ctx, token)
 	if err != nil {
