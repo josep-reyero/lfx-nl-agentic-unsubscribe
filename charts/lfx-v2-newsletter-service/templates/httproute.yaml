@@ -21,6 +21,8 @@ spec:
     # Newsletter endpoints are project-scoped:
     #   /projects/{project_uid}/newsletters[/<rest>]
     #   /projects/{project_uid}/newsletter-opens/{newsletter_uid}
+    # plus the top-level recipient-facing unsubscribe route:
+    #   /newsletters/unsubscribe
     # Gateway API's `RegularExpression` path-match type lets us pluck the
     # newsletter-owned subset out of the `/projects/...` URL space without
     # routing every project sub-path here (project-service owns the rest).
@@ -33,6 +35,9 @@ spec:
         - path:
             type: RegularExpression
             value: "^/projects/[^/]+/newsletter-opens/[^/]+$"
+        - path:
+            type: RegularExpression
+            value: "^/newsletters/unsubscribe$"
       {{- if .Values.heimdall.enabled }}
       filters:
         - type: ExtensionRef

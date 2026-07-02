@@ -51,13 +51,15 @@ type NewsletterRepository interface {
 	Analytics(ctx context.Context, newsletterID uuid.UUID) (*model.Analytics, error)
 }
 
-// UnsubscribeRepository persists project-scoped opt-outs.
+// UnsubscribeRepository persists project-scoped opt-outs, keyed by the
+// opaque recipient hash (service.HashRecipient) rather than the plaintext
+// address, so the store carries no recoverable PII for this flow.
 //
 // CreateUnsubscribe must be idempotent: a second unsubscribe for the same
-// (project_uid, email) pair must succeed silently.
+// (project_uid, email_hash) pair must succeed silently.
 type UnsubscribeRepository interface {
-	CreateUnsubscribe(ctx context.Context, projectUID, email string) error
-	ListUnsubscribedEmails(ctx context.Context, projectUID string) (map[string]struct{}, error)
+	CreateUnsubscribe(ctx context.Context, projectUID, emailHash string) error
+	ListUnsubscribedHashes(ctx context.Context, projectUID string) (map[string]struct{}, error)
 }
 
 // CommitteeClient resolves committee members for newsletter recipient calculation.

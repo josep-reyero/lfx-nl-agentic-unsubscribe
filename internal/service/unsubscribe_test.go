@@ -21,15 +21,22 @@ func TestUnsubscribeTokenRoundTrip(t *testing.T) {
 	}
 	token := url[strings.Index(url, "?t=")+3:]
 
-	gotProject, gotEmail, err := svc.VerifyToken(token)
+	gotProject, gotHash, err := svc.VerifyToken(token)
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
 	if gotProject != "proj-1" {
 		t.Errorf("project = %q, want proj-1", gotProject)
 	}
-	if gotEmail != "alice@example.com" {
-		t.Errorf("email = %q, want lowercased alice@example.com", gotEmail)
+	if want := HashRecipient("alice@example.com"); gotHash != want {
+		t.Errorf("hash = %q, want %q (hash of the lowercased address)", gotHash, want)
+	}
+	if strings.Contains(strings.ToLower(token), "alice") {
+		t.Errorf("token %q leaks the plaintext address", token)
+	}
+	raw, _ := base64.RawURLEncoding.DecodeString(token)
+	if strings.Contains(strings.ToLower(string(raw)), "alice") {
+		t.Errorf("decoded token payload %q leaks the plaintext address", raw)
 	}
 }
 
@@ -37,10 +44,10 @@ func TestUnsubscribeTokenTampered(t *testing.T) {
 	svc := NewUnsubscribeService(nil, []byte("test-secret"), "https://api.example")
 	good := svc.buildToken("proj-1", "alice@example.com")
 
-	// Decode, swap email, re-encode with original MAC.
+	// Decode, swap the recipient hash, re-encode with the original MAC.
 	raw, _ := base64.RawURLEncoding.DecodeString(good)
 	parts := strings.Split(string(raw), "\n")
-	tampered := base64.RawURLEncoding.EncodeToString([]byte(parts[0] + "\n" + "mallory@example.com" + "\n" + parts[2]))
+	tampered := base64.RawURLEncoding.EncodeToString([]byte(parts[0] + "\n" + HashRecipient("mallory@example.com") + "\n" + parts[2]))
 
 	if _, _, err := svc.VerifyToken(tampered); !errors.Is(err, domain.ErrInvalidRequest) {
 		t.Fatalf("tampered token: got %v, want ErrInvalidRequest", err)

@@ -111,10 +111,13 @@ func (h *Handler) Routes() http.Handler {
 	// hash in the query string.
 	mux.HandleFunc("GET /projects/{project_uid}/newsletter-opens/{newsletter_uid}", h.OpenPixel)
 
-	// One-click unsubscribe — intentionally unauthenticated; requested by a
-	// recipient clicking the footer link. Authorization comes from the
-	// HMAC-signed token in the query string.
+	// Unsubscribe — intentionally unauthenticated; requested by a recipient
+	// clicking the footer link. Authorization comes from the HMAC-signed
+	// token. GET only verifies and renders the confirmation form (safe for
+	// mailbox scanners that prefetch links); the POST it submits records the
+	// opt-out.
 	mux.HandleFunc("GET /newsletters/unsubscribe", h.Unsubscribe)
+	mux.HandleFunc("POST /newsletters/unsubscribe", h.ConfirmUnsubscribe)
 
 	// Outermost middleware first: request ID so it appears on every log line,
 	// then request log so it captures status + duration.

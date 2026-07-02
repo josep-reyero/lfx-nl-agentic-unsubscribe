@@ -62,21 +62,24 @@ func (s *UnsubscribeService) BuildURL(projectUID, email string) string {
 	return s.baseURL + unsubscribePath + "?t=" + url.QueryEscape(s.buildToken(projectUID, email))
 }
 
-// buildToken returns base64url(projectUID + "\n" + email + "\n" + hexMAC).
-// Newline is the field separator because it cannot appear in a project UID
-// or an email address.
+// buildToken returns base64url(projectUID + "\n" + emailHash + "\n" + hexMAC),
+// where emailHash is the same opaque SHA-256 recipient hash the open-tracking
+// pixel uses (HashRecipient). The plaintext address never enters the token:
+// the token travels in a recipient-facing URL (mail logs, browser history,
+// forwarded emails), so everything in it must be non-identifying. Newline is
+// the field separator because it cannot appear in a project UID or a hex hash.
 func (s *UnsubscribeService) buildToken(projectUID, email string) string {
-	email = strings.ToLower(strings.TrimSpace(email))
-	payload := projectUID + "\n" + email
+	payload := projectUID + "\n" + HashRecipient(email)
 	mac := s.sign(payload)
 	return base64.RawURLEncoding.EncodeToString([]byte(payload + "\n" + mac))
 }
 
-// VerifyToken decodes and authenticates an unsubscribe token. Returns
+// VerifyToken decodes and authenticates an unsubscribe token, returning the
+// project UID and the opaque recipient hash it carries. Returns
 // domain.ErrInvalidRequest on any decode failure or signature mismatch so
 // the handler can surface a single "invalid link" response without leaking
 // which step failed.
-func (s *UnsubscribeService) VerifyToken(token string) (projectUID, email string, err error) {
+func (s *UnsubscribeService) VerifyToken(token string) (projectUID, emailHash string, err error) {
 	if len(s.secret) == 0 {
 		return "", "", fmt.Errorf("%w: unsubscribe is not configured", domain.ErrInvalidRequest)
 	}
@@ -88,32 +91,34 @@ func (s *UnsubscribeService) VerifyToken(token string) (projectUID, email string
 	if len(parts) != 3 {
 		return "", "", fmt.Errorf("%w: malformed token", domain.ErrInvalidRequest)
 	}
-	projectUID, email, gotMAC := parts[0], parts[1], parts[2]
-	if projectUID == "" || email == "" {
+	projectUID, emailHash, gotMAC := parts[0], parts[1], parts[2]
+	if projectUID == "" || emailHash == "" {
 		return "", "", fmt.Errorf("%w: malformed token", domain.ErrInvalidRequest)
 	}
-	wantMAC := s.sign(projectUID + "\n" + email)
+	wantMAC := s.sign(projectUID + "\n" + emailHash)
 	if !hmac.Equal([]byte(gotMAC), []byte(wantMAC)) {
 		return "", "", fmt.Errorf("%w: invalid signature", domain.ErrInvalidRequest)
 	}
-	return projectUID, email, nil
+	return projectUID, emailHash, nil
 }
 
-// Unsubscribe verifies the token and records the opt-out. Returns the
-// decoded project UID and email so the handler can render a confirmation.
-func (s *UnsubscribeService) Unsubscribe(ctx context.Context, token string) (projectUID, email string, err error) {
-	projectUID, email, err = s.VerifyToken(token)
+// Unsubscribe verifies the token and records the opt-out, keyed by the
+// opaque recipient hash. Returns the decoded project UID so the handler can
+// name the project in the confirmation; the plaintext address is never
+// available here, so the confirmation stays generic.
+func (s *UnsubscribeService) Unsubscribe(ctx context.Context, token string) (projectUID string, err error) {
+	projectUID, emailHash, err := s.VerifyToken(token)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
-	if err := s.repo.CreateUnsubscribe(ctx, projectUID, email); err != nil {
-		return "", "", err
+	if err := s.repo.CreateUnsubscribe(ctx, projectUID, emailHash); err != nil {
+		return "", err
 	}
 	slog.InfoContext(ctx, "newsletter unsubscribe recorded",
 		"project_uid", projectUID,
-		"email", redactEmail(email),
+		"email_hash", emailHash[:min(8, len(emailHash))],
 	)
-	return projectUID, email, nil
+	return projectUID, nil
 }
 
 func (s *UnsubscribeService) sign(payload string) string {
