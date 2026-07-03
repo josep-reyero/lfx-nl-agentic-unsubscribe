@@ -41,7 +41,7 @@ func (h *Handler) Unsubscribe(w http.ResponseWriter, r *http.Request) {
 	projectUID, _, err := h.unsub.VerifyToken(token)
 	if err != nil {
 		slog.WarnContext(ctx, "unsubscribe: invalid token", "error", err.Error())
-		writeUnsubscribeHTML(w, http.StatusBadRequest, "Invalid link", "This unsubscribe link is invalid or has expired.")
+		writeUnsubscribeHTML(w, http.StatusBadRequest, "Invalid link", "This unsubscribe link is not valid.")
 		return
 	}
 
@@ -71,7 +71,7 @@ func (h *Handler) ConfirmUnsubscribe(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalidRequest) {
 			slog.WarnContext(ctx, "unsubscribe: invalid token", "error", err.Error())
-			writeUnsubscribeHTML(w, http.StatusBadRequest, "Invalid link", "This unsubscribe link is invalid or has expired.")
+			writeUnsubscribeHTML(w, http.StatusBadRequest, "Invalid link", "This unsubscribe link is not valid.")
 			return
 		}
 		slog.ErrorContext(ctx, "unsubscribe: failed", "error", err.Error())

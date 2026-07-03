@@ -111,11 +111,13 @@ func AppConfigFromEnv() (AppConfig, error) {
 	if cfg.RequireUserAuth && cfg.ExpectedAudience == "" {
 		missing = append(missing, "JWT_AUDIENCE (required when REQUIRE_USER_AUTH=true)")
 	}
-	if cfg.SendFanoutEnabled && cfg.UnsubscribeSecret == "" {
-		missing = append(missing, "NEWSLETTER_UNSUBSCRIBE_SECRET (required when SEND_FANOUT_ENABLED=true)")
-	}
-	if cfg.SendFanoutEnabled && cfg.PublicBaseURL == "" {
-		missing = append(missing, "NEWSLETTER_PUBLIC_BASE_URL (required when SEND_FANOUT_ENABLED=true)")
+	// Unsubscribe is deliberately optional: when neither var is set the
+	// footer falls back to the legacy "reply with UNSUBSCRIBE" copy, so
+	// deployments that enable fan-out without the new vars keep working.
+	// Setting exactly one of the pair is a misconfiguration, though — a
+	// link cannot be minted without both the signing key and the origin.
+	if (cfg.UnsubscribeSecret == "") != (cfg.PublicBaseURL == "") {
+		missing = append(missing, "NEWSLETTER_UNSUBSCRIBE_SECRET and NEWSLETTER_PUBLIC_BASE_URL (set both to enable unsubscribe links, or neither for the legacy footer)")
 	}
 	if len(missing) > 0 {
 		return cfg, fmt.Errorf("missing required env vars: %s", strings.Join(missing, ", "))
