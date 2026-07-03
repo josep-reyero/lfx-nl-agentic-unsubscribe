@@ -76,7 +76,7 @@ func (s *UnsubscribeService) BuildURL(projectUID, email string) string {
 // the field separator because it cannot appear in a project UID or a hex hash.
 func (s *UnsubscribeService) buildToken(projectUID, email string) string {
 	payload := projectUID + "\n" + HashRecipient(email)
-	mac := s.sign(payload)
+	mac := hex.EncodeToString(s.sign(payload))
 	return base64.RawURLEncoding.EncodeToString([]byte(payload + "\n" + mac))
 }
 
@@ -101,8 +101,14 @@ func (s *UnsubscribeService) VerifyToken(token string) (projectUID, emailHash st
 	if projectUID == "" || !emailHashPattern.MatchString(emailHash) {
 		return "", "", fmt.Errorf("%w: malformed token", domain.ErrInvalidRequest)
 	}
-	wantMAC := s.sign(projectUID + "\n" + emailHash)
-	if !hmac.Equal([]byte(gotMAC), []byte(wantMAC)) {
+	// The MAC must be exactly a hex-encoded 32-byte SHA-256 HMAC; decode and
+	// compare the raw bytes so an arbitrary-shape string can never reach the
+	// comparison.
+	gotRaw, err := hex.DecodeString(gotMAC)
+	if err != nil || len(gotRaw) != sha256.Size {
+		return "", "", fmt.Errorf("%w: malformed token", domain.ErrInvalidRequest)
+	}
+	if !hmac.Equal(gotRaw, s.sign(projectUID+"\n"+emailHash)) {
 		return "", "", fmt.Errorf("%w: invalid signature", domain.ErrInvalidRequest)
 	}
 	return projectUID, emailHash, nil
@@ -130,8 +136,10 @@ func (s *UnsubscribeService) Unsubscribe(ctx context.Context, token string) (pro
 	return projectUID, nil
 }
 
-func (s *UnsubscribeService) sign(payload string) string {
+// sign returns the raw 32-byte SHA-256 HMAC of payload. Callers hex-encode
+// for transport (buildToken) and compare raw bytes for verification.
+func (s *UnsubscribeService) sign(payload string) []byte {
 	h := hmac.New(sha256.New, s.secret)
 	h.Write([]byte(payload))
-	return hex.EncodeToString(h.Sum(nil))
+	return h.Sum(nil)
 }

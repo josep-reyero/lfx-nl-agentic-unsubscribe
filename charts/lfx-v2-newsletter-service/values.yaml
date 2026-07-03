@@ -71,7 +71,9 @@ app:
   # unsubscribe configures the per-recipient one-click opt-out link
   # embedded in the email footer. publicBaseURL is the externally-reachable
   # origin of this service; the HMAC secret signs the token so links can't
-  # be forged. Both are REQUIRED when send.fanoutEnabled=true.
+  # be forged. Optional: when both are unset the footer falls back to the
+  # legacy "reply with UNSUBSCRIBE" copy. To enable links, set BOTH (the
+  # app rejects setting only one of the pair).
   unsubscribe:
     publicBaseURL: ""
     # secret sets the HMAC key directly (local/dev only). Prefer secretRef.
