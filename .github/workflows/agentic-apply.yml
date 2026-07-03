@@ -16,10 +16,11 @@
 # unforgeable. In this test the owner is josep-reyero (also the PR author), so the
 # boundary is degenerate self-trust — fine for validating the plumbing only.
 #
-# This runs on the agent's own comment (triggering actor = Copilot). It works only
-# because the repo has "require approval for Copilot workflow runs" turned OFF; that
-# is what lets us react instead of polling. It runs from the default branch (trusted
-# code, not anything the agent wrote).
+# This runs on the agent's verdict comment. Because the agents post via the MCP
+# PAT, the comment — and therefore this run — is attributed to the PAT owner,
+# NOT to a Copilot actor, so Copilot workflow gating never applies and we can
+# react instead of polling. It runs from the default branch (trusted code, not
+# anything the agent wrote).
 #
 # Writes use REVIEWER_PAT_GENERAL (needs Issues, Pull requests, and Commit statuses
 # read/write). The comment body is passed via env, never interpolated into the run

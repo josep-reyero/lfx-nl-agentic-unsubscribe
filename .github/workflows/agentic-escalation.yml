@@ -8,9 +8,10 @@
 # GitHub MCP (add_issue_comment). The native review is requested by agentic-conductor,
 # which also waits for it before reconciling.
 #
-# We do NOT poll or wait here. The repo has "require approval for Copilot workflow
-# runs" turned OFF, so the agent's own comment triggers agentic-apply.yml, which
-# reads the verdict and sets the sticky needs-human label. Fire and forget.
+# We do NOT poll or wait here. The agent posts its verdict via the MCP PAT, so the
+# comment is attributed to the PAT owner (not a Copilot actor) and triggers
+# agentic-apply.yml un-gated, which reads the verdict and sets the sticky
+# needs-human label. Fire and forget.
 #
 # Runs as REVIEWER_PAT_GENERAL (write + a Copilot seat, to request the reviewer and
 # start the task).
