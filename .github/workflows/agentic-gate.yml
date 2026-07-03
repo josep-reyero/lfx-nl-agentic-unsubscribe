@@ -13,7 +13,7 @@
 # re-derives from the current head, so a PR that advanced past the reviewed SHA
 # fails closed.
 #
-# Guarded by the AGENTIC_GATE_ENABLED repo variable (shadow mode until 'true').
+# The gate is always live: it records its verdict on every run.
 #
 # TEST VARIANT: production posts an approving review as the lfx-reviewer machine
 # user (a non-author with write + a seat). This test repo's PRs are authored by the
@@ -100,14 +100,8 @@ jobs:
             echo "Withholding approval." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Shadow mode (gate disabled)
-        if: steps.gate.outputs.approve == 'true' && vars.AGENTIC_GATE_ENABLED != 'true'
-        run: |
-          echo "Gate WOULD approve PR #${{ steps.pr.outputs.pr }} (clean, no needs-human)." >> "$GITHUB_STEP_SUMMARY"
-          echo "AGENTIC_GATE_ENABLED != 'true'; nothing posted (shadow mode)." >> "$GITHUB_STEP_SUMMARY"
-
       - name: Record approving verdict (label — test variant)
-        if: steps.gate.outputs.approve == 'true' && vars.AGENTIC_GATE_ENABLED == 'true'
+        if: steps.gate.outputs.approve == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -118,7 +112,7 @@ jobs:
           echo "Gate verdict: APPROVE (production would post the approving review as lfx-reviewer)." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record withheld verdict (label)
-        if: steps.gate.outputs.approve == 'false' && steps.pr.outputs.found == 'true' && vars.AGENTIC_GATE_ENABLED == 'true'
+        if: steps.gate.outputs.approve == 'false' && steps.pr.outputs.found == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
