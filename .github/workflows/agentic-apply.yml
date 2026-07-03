@@ -1,7 +1,7 @@
 # Copyright The Linux Foundation and each contributor to LFX.
 # SPDX-License-Identifier: MIT
 #
-# Reactive write layer. The escalation task and the @copilot conductor produce only
+# Reactive write layer. The escalation and reconcile agent tasks produce only
 # comments; every GitHub write is done here, keyed to a comment authored by the
 # trusted agent identity so a developer cannot forge a verdict:
 #   - a `needs-human: yes` comment  -> set the sticky needs-human label
@@ -53,7 +53,9 @@ jobs:
     steps:
       - name: Set sticky needs-human label
         run: |
-          if printf '%s' "$BODY" | grep -qiE 'needs-human:[[:space:]]*yes'; then
+          # Match the exact hidden marker from /agentic-comment-format, not any
+          # prose that happens to contain "needs-human: yes".
+          if printf '%s' "$BODY" | grep -qiE '<!--[[:space:]]*needs-human:[[:space:]]*yes[[:space:]]*-->'; then
             present=$(gh api "repos/$REPO/issues/$PR/labels" --jq '[.[].name] | index("needs-human")')
             if [ "$present" = "null" ] || [ -z "$present" ]; then
               gh api --method POST "repos/$REPO/issues/$PR/labels" -f "labels[]=needs-human"
@@ -66,25 +68,38 @@ jobs:
         run: |
           printf '%s' "$BODY" | grep -q '<!-- agentic:check v1 -->' || { echo "no agentic-check block; skip"; exit 0; }
 
+          # Parse ONLY the machine block (from its marker to the end of the
+          # comment, where /agentic-comment-format puts it), so prose in the
+          # human summary that happens to start a line with "head:", "clean:",
+          # or "- id:" can never steer the verdict or the thread actions.
+          BLOCK=$(printf '%s\n' "$BODY" | sed -n '/<!-- agentic:check v1 -->/,$p')
+
           # Set the status on the SHA the verdict was produced for (carried in the
           # block as `head:`), NOT the PR's current head. Otherwise a commit that
           # races in between the verdict and this run could mark a newer, unreviewed
           # head clean. If the SHA differs from the current head, the gate re-derives
           # from the current head (still pending) and fails closed — which is correct.
-          TARGET_SHA=$(printf '%s' "$BODY" | grep -iE '^[[:space:]]*head:[[:space:]]*[0-9a-f]{7,40}[[:space:]]*$' | head -1 | grep -oiE '[0-9a-f]{7,40}' | head -1)
+          TARGET_SHA=$(printf '%s' "$BLOCK" | grep -iE '^[[:space:]]*head:[[:space:]]*[0-9a-f]{7,40}[[:space:]]*$' | head -1 | grep -oiE '[0-9a-f]{7,40}' | head -1)
           if [ -z "$TARGET_SHA" ]; then
             TARGET_SHA=$(gh api "repos/$REPO/pulls/$PR" --jq '.head.sha')
             echo "::warning::agentic-check block carries no head:; falling back to current head $TARGET_SHA"
           fi
-          CLEAN=$(printf '%s' "$BODY" | grep -iE 'clean:[[:space:]]*(true|false)' | head -1 | grep -oiE 'true|false' | tr '[:upper:]' '[:lower:]')
+          # Anchored to the whole line, like head:, so prose mentioning "clean:"
+          # outside the machine block can never set the verdict.
+          CLEAN=$(printf '%s' "$BLOCK" | grep -iE '^[[:space:]]*clean:[[:space:]]*(true|false)[[:space:]]*$' | head -1 | grep -oiE 'true|false' | tr '[:upper:]' '[:lower:]')
           echo "target=$TARGET_SHA clean=$CLEAN"
 
           # Act on each thread the conductor listed. Non-blocking states get resolved;
           # still-blocking states get re-opened if they were resolved prematurely, so
           # the thread state can never contradict the gate (which reads this block).
-          printf '%s\n' "$BODY" | grep -E '^[[:space:]]*-[[:space:]]*id:' | while IFS= read -r line; do
-            tid=$(printf '%s' "$line" | sed -nE 's/.*id:[[:space:]]*([^[:space:]]+).*/\1/p')
-            st=$(printf '%s' "$line" | sed -nE 's/.*status:[[:space:]]*([^[:space:]]+).*/\1/p')
+          printf '%s\n' "$BLOCK" | grep -E '^[[:space:]]*-[[:space:]]*id:' | while IFS= read -r line; do
+            # Fields are comma-separated (id, status, severity, reason). Drop the
+            # free-text reason before extracting, so a sentence mentioning "id:" or
+            # "status:" can never pollute the fields, and exclude commas from the
+            # captures so the separators are not swallowed.
+            meta=${line%%reason:*}
+            tid=$(printf '%s' "$meta" | sed -nE 's/.*id:[[:space:]]*([^[:space:],]+).*/\1/p')
+            st=$(printf '%s' "$meta" | sed -nE 's/.*status:[[:space:]]*([^[:space:],]+).*/\1/p')
             case "$st" in
               fixed|obsolete|rebutted-valid)
                 # shellcheck disable=SC2016  # $id is a GraphQL variable, not a shell expansion

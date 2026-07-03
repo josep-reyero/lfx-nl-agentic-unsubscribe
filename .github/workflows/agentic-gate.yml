@@ -39,11 +39,15 @@ permissions:
 
 jobs:
   gate:
-    # A status event fires for every context (CI statuses too); only react to our own
-    # agentic-review/clean status. Label events always pass this guard.
+    # Only react to the two gating signals: our own agentic-review/clean status (a
+    # status event fires for every context, CI statuses too) and the needs-human
+    # label (label events fire for every label, so routine label churn — including
+    # this gate's own verdict labels — is ignored).
     if: >-
-      github.event_name != 'status' ||
-      github.event.context == 'agentic-review/clean'
+      (github.event_name != 'status' ||
+       github.event.context == 'agentic-review/clean') &&
+      (github.event_name != 'pull_request' ||
+       github.event.label.name == 'needs-human')
     runs-on: ubuntu-latest
     steps:
       - name: Resolve PR
@@ -51,7 +55,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          EVENT_NAME: ${{ github.event_name }}
           EVENT_PR: ${{ github.event.pull_request.number }}
           EVENT_SHA: ${{ github.event.sha }}
         run: |
