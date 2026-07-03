@@ -13,10 +13,13 @@ import (
 )
 
 func TestUnsubscribeTokenRoundTrip(t *testing.T) {
-	svc := NewUnsubscribeService(nil, []byte("test-secret"), "https://api.example/newsletter")
+	// A bare origin, the documented NEWSLETTER_PUBLIC_BASE_URL shape: the
+	// gateway routes /newsletters/unsubscribe at the root, so no path
+	// segment belongs in the base URL.
+	svc := NewUnsubscribeService(nil, []byte("test-secret"), "https://api.example")
 
 	url := svc.BuildURL("proj-1", "Alice@Example.com")
-	if !strings.HasPrefix(url, "https://api.example/newsletter/newsletters/unsubscribe?t=") {
+	if !strings.HasPrefix(url, "https://api.example/newsletters/unsubscribe?t=") {
 		t.Fatalf("unexpected url: %s", url)
 	}
 	token := url[strings.Index(url, "?t=")+3:]
