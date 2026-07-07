@@ -306,6 +306,45 @@ func (r *PostgresNewsletterRepo) Analytics(ctx context.Context, newsletterID uui
 	}, nil
 }
 
+// CreateUnsubscribe records a project-scoped opt-out, keyed by the opaque
+// recipient hash. Idempotent: a second call for the same
+// (project_uid, email_hash) pair is a no-op via the unique index. The hash is
+// computed from the lowercased address upstream, so casing in the recipient's
+// mail client cannot produce duplicate rows.
+func (r *PostgresNewsletterRepo) CreateUnsubscribe(ctx context.Context, projectUID, emailHash string) error {
+	row := &model.NewsletterUnsubscribe{
+		ProjectUID: projectUID,
+		EmailHash:  strings.ToLower(strings.TrimSpace(emailHash)),
+	}
+	if _, err := r.db.NewInsert().
+		Model(row).
+		On("CONFLICT (project_uid, email_hash) DO NOTHING").
+		Exec(ctx); err != nil {
+		return fmt.Errorf("insert unsubscribe: %w", err)
+	}
+	return nil
+}
+
+// ListUnsubscribedHashes returns the set of opaque recipient hashes that have
+// opted out of newsletters for the given project. Returned as a map so the
+// send orchestrator can filter the recipient list in O(1) per address.
+func (r *PostgresNewsletterRepo) ListUnsubscribedHashes(ctx context.Context, projectUID string) (map[string]struct{}, error) {
+	var hashes []string
+	err := r.db.NewSelect().
+		Model((*model.NewsletterUnsubscribe)(nil)).
+		Column("email_hash").
+		Where("project_uid = ?", projectUID).
+		Scan(ctx, &hashes)
+	if err != nil {
+		return nil, fmt.Errorf("list unsubscribes: %w", err)
+	}
+	out := make(map[string]struct{}, len(hashes))
+	for _, h := range hashes {
+		out[h] = struct{}{}
+	}
+	return out, nil
+}
+
 // classifyMissing distinguishes ErrNotFound from ErrVersionMismatch after an
 // Update affected zero rows.
 func (r *PostgresNewsletterRepo) classifyMissing(ctx context.Context, id uuid.UUID) error {
