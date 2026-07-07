@@ -122,3 +122,21 @@ ALTER TABLE newsletter_opens
 -- The application is expected to use ON CONFLICT DO NOTHING when inserting.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_opens_newsletter_recipient_hour
     ON newsletter_opens (newsletter_id, recipient_hash, opened_at_hour);
+
+-- newsletter_unsubscribes records project-scoped opt-outs. A row means the
+-- recipient behind email_hash has unsubscribed from all newsletters for that
+-- project_uid; the same recipient may still receive newsletters for other
+-- projects. email_hash is the opaque SHA-256 hash of the lowercased address
+-- (the same value newsletter_opens.recipient_hash uses), so no plaintext
+-- address is persisted for this recipient-facing flow, and hashing the
+-- normalized address makes the unique index idempotent without CITEXT.
+CREATE TABLE IF NOT EXISTS newsletter_unsubscribes (
+    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_uid TEXT        NOT NULL,
+    email_hash  TEXT        NOT NULL CHECK (email_hash ~ '^[a-f0-9]{64}$'),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_unsubscribes_project_email_hash
+    ON newsletter_unsubscribes (project_uid, email_hash);
