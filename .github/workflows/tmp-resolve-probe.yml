@@ -5,21 +5,31 @@ name: tmp-resolve-probe
       thread_id:
         required: true
         type: string
-      with_contents:
-        required: true
-        type: string
 permissions: {}
 jobs:
-  probe:
+  with-contents:
     runs-on: ubuntu-latest
-    permissions: ${{ inputs.with_contents == 'yes' && fromJSON('{"pull-requests":"write","contents":"read"}') || fromJSON('{"pull-requests":"write"}') }}
+    permissions:
+      pull-requests: write
+      contents: read
     env:
       GH_TOKEN: ${{ github.token }}
       TID: ${{ inputs.thread_id }}
     steps:
       - run: |
-          echo "permset with_contents=${{ inputs.with_contents }}"
-          echo "--- unresolve ---"
+          echo "== permset A: pull-requests:write + contents:read =="
           gh api graphql -f query='mutation($id:ID!){unresolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id="$TID" 2>&1 || true
-          echo "--- resolve ---"
+          gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id="$TID" 2>&1 || true
+  pr-only:
+    runs-on: ubuntu-latest
+    needs: with-contents
+    permissions:
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TID: ${{ inputs.thread_id }}
+    steps:
+      - run: |
+          echo "== permset B: pull-requests:write only =="
+          gh api graphql -f query='mutation($id:ID!){unresolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id="$TID" 2>&1 || true
           gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -f id="$TID" 2>&1 || true
